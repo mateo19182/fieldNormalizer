@@ -21,7 +21,7 @@ def parse_args():
         description="Field Normalizer: Extract and process data from various file formats."
     )
     
-    # Create subparsers for the two main operations
+    # Create subparsers for the main operations
     subparsers = parser.add_subparsers(dest="command", help="Command to execute")
     
     # Common arguments for both commands
@@ -82,11 +82,6 @@ def parse_args():
         help="Field mappings file (JSON format, default: mappings.json)",
     )
     extract_parser.add_argument(
-        "paths",
-        nargs="*",
-        help="Optional paths to process (if not specified, uses paths from mappings file)",
-    )
-    extract_parser.add_argument(
         "--output",
         "-o",
         default="extracted_data.jsonl",
@@ -97,6 +92,45 @@ def parse_args():
         type=int,
         default=1000,
         help="Batch size for writing records to output file",
+    )
+    
+    # 3. Process command - combines analyze and extract in one step
+    process_parser = subparsers.add_parser(
+        "process",
+        parents=[common_parser],
+        help="Analyze files and extract data in one step"
+    )
+    process_parser.add_argument(
+        "--analysis-output",
+        default=None,
+        help="Output file for analysis report (default: no file output)",
+    )
+    process_parser.add_argument(
+        "--mappings-output",
+        default="mappings.json",
+        help="Output file for field mappings (default: mappings.json)",
+    )
+    process_parser.add_argument(
+        "--extract-output",
+        "-o",
+        default="extracted_data.jsonl",
+        help="Output file for extracted data (default: extracted_data.jsonl)",
+    )
+    process_parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=1000,
+        help="Batch size for writing records to output file",
+    )
+    process_parser.add_argument(
+        "--no-normalize",
+        action="store_true",
+        help="Disable field normalization (enabled by default)",
+    )
+    process_parser.add_argument(
+        "--no-variations",
+        action="store_true",
+        help="Don't show field variations in the output (shown by default)",
     )
     
     return parser.parse_args()
@@ -279,22 +313,12 @@ def main():
             print(f"Error: Mappings file {args.mappings} not found", file=sys.stderr)
             sys.exit(1)
         
-        # Get file paths from the mappings file if not specified
-        if not args.paths:
-            # Extract file paths from the mappings
-            mapping_paths = field_mapper.get_all_file_paths()
-            if not mapping_paths:
-                print("Error: No file paths found in mappings file", file=sys.stderr)
-                sys.exit(1)
-            print(f"Using {len(mapping_paths)} file paths from mappings file")
-            data_files = mapping_paths
-        else:
-            # Find data files in the specified paths
-            # Use default file types if not specified
-            file_types = getattr(args, 'file_types', ["csv", "json", "sql"])
-            max_files = getattr(args, 'max_files', None)
-            data_files = find_data_files(args.paths, file_types, max_files)
-            print(f"Found {len(data_files)} data files to process")
+        # Extract file paths from the mappings
+        data_files = field_mapper.get_all_file_paths()
+        if not data_files:
+            print("Error: No file paths found in mappings file", file=sys.stderr)
+            sys.exit(1)
+        print(f"Using {len(data_files)} file paths from mappings file")
         
         # Extract data using the field mappings
         print(f"Extracting data from {len(data_files)} files...")
@@ -305,9 +329,86 @@ def main():
         total_records = write_jsonl(records, args.output, args.batch_size)
         print(f"Extracted {total_records} records to {args.output}")
     
+    elif args.command == "process":
+        # Find all data files in the specified paths
+        data_files = find_data_files(args.paths, args.file_types, args.max_files)
+        print(f"Found {len(data_files)} data files to process")
+        
+        # Step 1: Analyze files and create mappings
+        print("\n=== Step 1: Analyzing files and creating mappings ===")
+        header_stats, file_metadata, failed_files = process_files(data_files)
+        
+        # Create field mappings
+        field_mapper = create_field_mappings(file_metadata)
+        
+        # Save mappings to file
+        field_mapper.save_mappings(args.mappings_output)
+        print(f"Saved field mappings to {args.mappings_output}")
+        
+        # Print analysis report if requested
+        if args.analysis_output:
+            # Generate report
+            if not args.no_normalize:
+                # Analyze field variations
+                field_variations = analyze_field_variations(header_stats)
+                
+                # Group fields by type
+                field_groups = group_fields(field_variations)
+                
+                # Format output
+                if args.no_variations:
+                    output = format_field_groups(field_groups, header_stats)
+                else:
+                    output = format_field_variations(field_variations, header_stats)
+            else:
+                # Just show raw headers without normalization
+                output = "\nRaw Headers (no normalization):\n\n"
+                output += "Header | Count | Files\n"
+                output += "-" * 50 + "\n"
+                
+                # Sort headers by count
+                sorted_headers = sorted(header_stats.items(), key=lambda x: x[1]['count'], reverse=True)
+                for header, stats in sorted_headers:
+                    # Truncate the files list if it's too long for display
+                    files_str = ", ".join(stats['files'])
+                    if len(files_str) > 50:
+                        files_str = files_str[:47] + "..."
+                    output += f"{header} | {stats['count']} | {files_str}\n"
+            
+            # Write to file
+            with open(args.analysis_output, 'w', encoding='utf-8') as f:
+                f.write(output)
+            print(f"Saved analysis report to {args.analysis_output}")
+        
+        # Step 2: Extract data using the mappings
+        print("\n=== Step 2: Extracting data using mappings ===")
+        
+        # Extract data using the field mappings
+        print(f"Extracting data from {len(data_files)} files...")
+        records = extract_all_data(data_files, field_mapper)
+        
+        # Write to JSONL file
+        print(f"Writing records to {args.extract_output}...")
+        total_records = write_jsonl(records, args.extract_output, args.batch_size)
+        print(f"Extracted {total_records} records to {args.extract_output}")
+        
+        # Print processing statistics
+        print(f"\nProcessing Statistics:")
+        print(f"Total files: {len(data_files)}")
+        print(f"Successfully processed: {len(file_metadata)}")
+        print(f"Files with inferred headers: {sum(1 for m in file_metadata if m['headers_inferred'])}")
+        print(f"Failed: {len(failed_files)}")
+        print(f"Records extracted: {total_records}")
+        
+        # Print details about failed files if any
+        if failed_files:
+            print("\nFiles with errors:")
+            for file_path, error_msg in failed_files.items():
+                print(f"  - {os.path.basename(file_path)}: {error_msg}")
+    
     else:
         # No command specified, show help
-        print("Error: No command specified. Use 'analyze' or 'extract'.")
+        print("Error: No command specified. Use 'analyze', 'extract', or 'process'.")
         sys.exit(1)
     # This section is now handled within the command-specific blocks
     

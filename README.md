@@ -31,14 +31,16 @@ OPENROUTER_API_KEY=your_api_key_here
 
 ## Usage
 
-The tool now uses a two-command structure for clarity and ease of use:
+The tool offers three command options for flexibility:
 
-### Step 1: Analyze Command
+### Option 1: Two-Step Workflow (Analyze then Extract)
+
+#### Step 1: Analyze Command
 ```bash
 field-normalizer analyze [OPTIONS] PATHS...
 ```
 
-#### Analyze Command Options
+##### Analyze Command Options
 - `--file-types` - Specify file types to process (default: csv, json, sql)
 - `--max-files, -n` - Maximum number of files to process per directory
 - `--output, -o` - Output file for analysis report (default: stdout)
@@ -46,19 +48,37 @@ field-normalizer analyze [OPTIONS] PATHS...
 - `--no-variations` - Disable showing field variations (enabled by default)
 - `--mappings-output` - Output file for field mappings (default: mappings.json)
 
-### Step 2: Extract Command
+#### Step 2: Extract Command
 ```bash
-field-normalizer extract [OPTIONS] [PATHS...]
+field-normalizer extract [OPTIONS]
 ```
 
-#### Extract Command Options
+##### Extract Command Options
 - `--mappings` - Field mappings file (default: mappings.json)
 - `--output, -o` - Output file for extracted data (default: extracted_data.jsonl)
 - `--batch-size` - Batch size for writing records (default: 1000)
 
+### Option 2: One-Step Workflow (Process)
+
+```bash
+field-normalizer process [OPTIONS] PATHS...
+```
+
+#### Process Command Options
+- `--file-types` - Specify file types to process (default: csv, json, sql)
+- `--max-files, -n` - Maximum number of files to process per directory
+- `--analysis-output` - Output file for analysis report (default: no file output)
+- `--mappings-output` - Output file for field mappings (default: mappings.json)
+- `--extract-output, -o` - Output file for extracted data (default: extracted_data.jsonl)
+- `--batch-size` - Batch size for writing records (default: 1000)
+- `--no-normalize` - Disable field normalization (enabled by default)
+- `--no-variations` - Disable showing field variations (enabled by default)
+
 ### Examples
 
-#### Analyze Files and Create Mappings
+#### Two-Step Workflow
+
+##### Step 1: Analyze Files and Create Mappings
 ```bash
 # Analyze all supported files in a directory (with default normalization)
 field-normalizer analyze /path/to/data
@@ -73,9 +93,9 @@ field-normalizer analyze /path/to/data --output analysis_report.txt
 field-normalizer analyze /path/to/data --no-normalize --output raw_headers.txt
 ```
 
-#### Extract Data Using Mappings
+##### Step 2: Extract Data Using Mappings
 ```bash
-# Extract data using mappings.json (uses paths from the mappings file)
+# Extract data using mappings.json (automatically uses paths from the mappings file)
 field-normalizer extract
 
 # Extract data to a specific output file
@@ -83,9 +103,18 @@ field-normalizer extract --output contacts.jsonl
 
 # Use a different mappings file
 field-normalizer extract --mappings custom_mappings.json
+```
 
-# Extract from specific paths (overriding mappings file paths)
-field-normalizer extract /path/to/data --output contacts.jsonl
+#### One-Step Workflow
+```bash
+# Process all files in one step (analyze and extract)
+field-normalizer process /path/to/data
+
+# Specify output files for each step
+field-normalizer process /path/to/data --analysis-output report.txt --extract-output contacts.jsonl
+
+# Process specific file types with a limit
+field-normalizer process /path/to/data --file-types csv json --max-files 50
 ```
 
 ## Internal Architecture
@@ -132,14 +161,15 @@ The Field Normalizer is built around four main components:
 
 #### Step 2: Extract (Data Extraction)
 1. **Mapping Loading**: Field mappings are loaded from the JSON file
-2. **Stream Processing**: Files are processed one record at a time to minimize memory usage
-3. **Field Mapping**: Original headers are mapped to their normalized categories
-4. **Data Extraction**: For each record, relevant fields are extracted based on mappings
-5. **Value Handling**: Multiple fields mapping to the same category are combined
-6. **Record Merging**: Records with the same email address are merged
-7. **Deduplication**: Duplicate records are removed
-8. **NULL Handling**: NULL values are ignored
-9. **JSONL Output**: Records are written to output in JSONL format in batches
+2. **Path Extraction**: File paths are automatically extracted from the mappings file
+3. **Stream Processing**: Files are processed one record at a time to minimize memory usage
+4. **Field Mapping**: Original headers are mapped to their normalized categories
+5. **Data Extraction**: For each record, relevant fields are extracted based on mappings
+6. **Value Handling**: Multiple fields mapping to the same category are combined
+7. **Record Merging**: Records with the same email address are merged
+8. **Deduplication**: Duplicate records are removed
+9. **NULL Handling**: NULL values are ignored
+10. **JSONL Output**: Records are written to output in JSONL format in batches
 
 ### Memory-Efficient Processing
 
