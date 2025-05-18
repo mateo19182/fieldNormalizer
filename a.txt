@@ -1,0 +1,534 @@
+Field Normalization Report
+================================================================================
+Total files processed: 23
+Files with inferred headers: 2
+Files with standard headers: 21
+
+
+FILES WITH INFERRED HEADERS:
+================================================================================
+- Restaurants-Milan-_Italy.csv
+- bars-Bologna-C+Italy.csv
+
+
+EMAIL FIELDS:
+================================================================================
+  - Confirmed email
+  - E-mail
+  - Email
+  - Mailchimp
+  - email
+  - email1
+  - email2
+  - mail
+
+PHONE FIELDS:
+================================================================================
+  - Phone
+  - Phone Number
+  - cellulare
+  - cellulare1
+  - cellulare2
+  - phone
+  - phoneNumber
+  - recapito telefonico
+  - telefono
+  - telefono1
+  - telefono2
+
+NAME FIELDS:
+================================================================================
+  - Billing Firstname
+  - Billing Lastname
+  - Billing: first name
+  - Billing: last name
+  - Company Name
+  - First Name
+  - First name
+  - Last Name
+  - Last name
+  - Name
+  - Nome
+  - Restaurant Name
+  - Shipping: first name
+  - Shipping: last name
+  - Store Name
+  - Surname
+  - cognome
+  - cognome_nome
+  - firstName
+  - firstname
+  - lastName
+  - lastname
+  - name
+  - names
+  - nome
+  - surname
+  - username
+
+ADDRESS FIELDS:
+================================================================================
+  - Address
+  - Billing Address
+  - Billing: address
+  - Billing: address (line 2)
+  - Billing: city
+  - Billing: country
+  - Billing: state
+  - Billing: zipcode
+  - City
+  - Country
+  - Indirizzo
+  - Indirizzo di spedizione
+  - Paese
+  - Province
+  - Shipping Address
+  - Shipping: address
+  - Shipping: address (line 2)
+  - Shipping: city
+  - Shipping: country
+  - Shipping: state
+  - Shipping: zipcode
+  - State/Province
+  - Stato
+  - Stato/Provincia
+  - Street Address
+  - Tax VAT Number
+  - VAT Number
+  - ZIP
+  - ZipCode
+  - cap
+  - citta
+  - classe_fatturato
+  - country
+  - country_id
+  - denominazione
+  - indirizzo
+  - nazione
+  - numero1
+  - numero2
+  - numero3
+  - numero4
+  - provincia
+  - regione
+  - residenza
+  - ubicazione_piano
+
+
+FILE HEADERS:
+================================================================================
+
+Restaurants-Milan-_Italy.csv:
+  Address, Phone Number, Restaurant Name, Review Count, Website
+
+Restaurants-Palermo-Italy.csv:
+  Address, Phone Number, Restaurant Name, Reviews, Website
+
+[lb.sb] smarterstore.it.csv:
+  Account Created in, Account Lock, Billing Address, Billing Firstname, Billing Lastname, City, Company, Confirmed email, Country, Customer Since, Date of Birth, Email, Fax, Gender, Group, ID, Name, Phone, Shipping Address, State/Province, Street Address, Tax VAT Number, VAT Number, Web Site, ZIP
+
+accessi.csv:
+  data, id, ip, username
+
+bars-Bologna-C+Italy.csv:
+  Address, Name, Phone, Reviews, Website
+
+box_fbothotelcontacts.csv:
+  _id, _index, _score, _source, _type
+
+caorle_customers_clean.csv:
+  AdditionalPurposes, Address, BirthPlace, Birthday, City, Country, DataProfiling_Consent, DataProfiling_Infos, Email, Language, Marketing_Consent, Marketing_Infos, Name, Nationality, Newsletter_Consent, Newsletter_Infos, Phone, PrivacyPolicy, Province, Surname, ZipCode
+
+comune.selargius.ca.it.csv:
+  codice fiscale, cognome, data nascita, luogo di nascita, nome, recapito telefonico, residenza
+
+corpo_mail.csv:
+  ID, descrizione, titolo
+
+crmdemo2.csv:
+  cap, categoria, cellulare1, cellulare2, citta, classe_fatturato, codice_fiscale, email1, email2, escluso_campagna, fax, id, id_campagna, id_categoria_ATECO, id_contatto, indirizzo, lancio_effettuato, nazione, note, partita_iva, persona_riferimento, provincia, ragione_sociale, telefono1, telefono2, tipo_riferimento, web
+
+drivers.csv:
+  creationDate, email, firstName, iban, id, isActive, lastName, licensePlate, municipalityId, password, phoneNumber, pin, taxiLicense, taxiModel, taxiType
+
+faitutto.it.csv:
+  attivo, cellulare, codice_attivazione, codice_fiscale, cognome, data_registrazione, email, fax, id, id_comune, immagine, indirizzo, limite_prenotazioni_non_pagate, nome, partita_iva, password, ragione_sociale, telefono, tipo
+
+franzysonline.it Franzy's Online Database - Franzysonline.it 18.11.2022.csv:
+  Account Created in, Account Lock, Billing Firstname, Billing Lastname, Città, Confirmed email, Customer Since, Data di nascita, Domicilio fiscale, Email, Fax, Gender, Gruppo, ID, Indirizzo, Indirizzo di spedizione, Mailchimp, Nome, Paese, Partita IVA, Phone, Società, Stato, Stato/Provincia, Tax VAT Number, Web Site, ZIP
+
+installatori.csv:
+  cap, citta, denominazione, email, id, image, indirizzo, latitude, longitude, provincia, regione, telefono, web
+
+italyfxtraders#1.csv:
+  Ip, Name, country, currency, mail, phone
+
+musclenutrition.com_132k_users_general_092022.csv:
+  Billing: address, Billing: address (line 2), Billing: city, Billing: country, Billing: first name, Billing: last name, Billing: state, Billing: zipcode, Company, E-mail, Extra fields, Fax, First name, Language, Last name, Password, Phone, Salt, Shipping: address, Shipping: address (line 2), Shipping: city, Shipping: country, Shipping: first name, Shipping: last name, Shipping: state, Shipping: zipcode, Store, Tax exempt, User type, Web site
+
+ps_customer (2).csv:
+  ape, birthday, email, firstname, id_customer, ip_registration_newsletter, lastname, newsletter, passwd
+
+ps_customer.csv:
+  Column3, Column4, Company Name, Date of Birth, Email, First Name, Hash, ID, Last Name
+
+sample_edt.it.csv:
+  email, id_old, is_super_user, name, password, remember_token, surname
+
+sample_mails_www.devpromodeals.com.csv:
+  completeTime, country_id, created_at, email, id, ip, lang, names, offer_translation_id, order_id, updated_at, verified_at
+
+shopping-Rome-C+Italy.csv:
+  Address, Phone Number, Review Count, Store Name, Website
+
+utenti.csv:
+  attivo, azienda, cap, cognome, comune, data, datamod, email, fax, id, indirizzo, nazione, newsletter, nome, password, provincia, settore, telefono, website
+
+utenti_copia_agosto2014.csv:
+  cognome_nome, email, id_utente, numero1, numero2, numero3, numero4, password, tipo_utente, ubicazione_piano, ufficio_rif
+
+
+UNMATCHED HEADERS:
+================================================================================
+
+Account Created in
+  Found in: franzysonline.it Franzy's Online Database - Franzysonline.it 18.11.2022.csv, [lb.sb] smarterstore.it.csv
+
+Account Lock
+  Found in: franzysonline.it Franzy's Online Database - Franzysonline.it 18.11.2022.csv, [lb.sb] smarterstore.it.csv
+
+AdditionalPurposes
+  Found in: caorle_customers_clean.csv
+
+BirthPlace
+  Found in: caorle_customers_clean.csv
+
+Birthday
+  Found in: caorle_customers_clean.csv
+
+Città
+  Found in: franzysonline.it Franzy's Online Database - Franzysonline.it 18.11.2022.csv
+
+Column3
+  Found in: ps_customer.csv
+
+Column4
+  Found in: ps_customer.csv
+
+Company
+  Found in: musclenutrition.com_132k_users_general_092022.csv, [lb.sb] smarterstore.it.csv
+
+Customer Since
+  Found in: franzysonline.it Franzy's Online Database - Franzysonline.it 18.11.2022.csv, [lb.sb] smarterstore.it.csv
+
+Data di nascita
+  Found in: franzysonline.it Franzy's Online Database - Franzysonline.it 18.11.2022.csv
+
+DataProfiling_Consent
+  Found in: caorle_customers_clean.csv
+
+DataProfiling_Infos
+  Found in: caorle_customers_clean.csv
+
+Date of Birth
+  Found in: ps_customer.csv, [lb.sb] smarterstore.it.csv
+
+Domicilio fiscale
+  Found in: franzysonline.it Franzy's Online Database - Franzysonline.it 18.11.2022.csv
+
+Extra fields
+  Found in: musclenutrition.com_132k_users_general_092022.csv
+
+Fax
+  Found in: musclenutrition.com_132k_users_general_092022.csv, franzysonline.it Franzy's Online Database - Franzysonline.it 18.11.2022.csv, [lb.sb] smarterstore.it.csv
+
+Gender
+  Found in: franzysonline.it Franzy's Online Database - Franzysonline.it 18.11.2022.csv, [lb.sb] smarterstore.it.csv
+
+Group
+  Found in: [lb.sb] smarterstore.it.csv
+
+Gruppo
+  Found in: franzysonline.it Franzy's Online Database - Franzysonline.it 18.11.2022.csv
+
+Hash
+  Found in: ps_customer.csv
+
+ID
+  Found in: ps_customer.csv, franzysonline.it Franzy's Online Database - Franzysonline.it 18.11.2022.csv, corpo_mail.csv...
+
+Ip
+  Found in: italyfxtraders#1.csv
+
+Language
+  Found in: musclenutrition.com_132k_users_general_092022.csv, caorle_customers_clean.csv
+
+Marketing_Consent
+  Found in: caorle_customers_clean.csv
+
+Marketing_Infos
+  Found in: caorle_customers_clean.csv
+
+Nationality
+  Found in: caorle_customers_clean.csv
+
+Newsletter_Consent
+  Found in: caorle_customers_clean.csv
+
+Newsletter_Infos
+  Found in: caorle_customers_clean.csv
+
+Partita IVA
+  Found in: franzysonline.it Franzy's Online Database - Franzysonline.it 18.11.2022.csv
+
+Password
+  Found in: musclenutrition.com_132k_users_general_092022.csv
+
+PrivacyPolicy
+  Found in: caorle_customers_clean.csv
+
+Review Count
+  Found in: shopping-Rome-C+Italy.csv, Restaurants-Milan-_Italy.csv
+
+Reviews
+  Found in: Restaurants-Palermo-Italy.csv, bars-Bologna-C+Italy.csv
+
+Salt
+  Found in: musclenutrition.com_132k_users_general_092022.csv
+
+Società
+  Found in: franzysonline.it Franzy's Online Database - Franzysonline.it 18.11.2022.csv
+
+Store
+  Found in: musclenutrition.com_132k_users_general_092022.csv
+
+Tax exempt
+  Found in: musclenutrition.com_132k_users_general_092022.csv
+
+User type
+  Found in: musclenutrition.com_132k_users_general_092022.csv
+
+Web Site
+  Found in: franzysonline.it Franzy's Online Database - Franzysonline.it 18.11.2022.csv, [lb.sb] smarterstore.it.csv
+
+Web site
+  Found in: musclenutrition.com_132k_users_general_092022.csv
+
+Website
+  Found in: shopping-Rome-C+Italy.csv, Restaurants-Palermo-Italy.csv, bars-Bologna-C+Italy.csv...
+
+_id
+  Found in: box_fbothotelcontacts.csv
+
+_index
+  Found in: box_fbothotelcontacts.csv
+
+_score
+  Found in: box_fbothotelcontacts.csv
+
+_source
+  Found in: box_fbothotelcontacts.csv
+
+_type
+  Found in: box_fbothotelcontacts.csv
+
+ape
+  Found in: ps_customer (2).csv
+
+attivo
+  Found in: faitutto.it.csv, utenti.csv
+
+azienda
+  Found in: utenti.csv
+
+birthday
+  Found in: ps_customer (2).csv
+
+categoria
+  Found in: crmdemo2.csv
+
+codice fiscale
+  Found in: comune.selargius.ca.it.csv
+
+codice_attivazione
+  Found in: faitutto.it.csv
+
+codice_fiscale
+  Found in: crmdemo2.csv, faitutto.it.csv
+
+completeTime
+  Found in: sample_mails_www.devpromodeals.com.csv
+
+comune
+  Found in: utenti.csv
+
+created_at
+  Found in: sample_mails_www.devpromodeals.com.csv
+
+creationDate
+  Found in: drivers.csv
+
+currency
+  Found in: italyfxtraders#1.csv
+
+data
+  Found in: accessi.csv, utenti.csv
+
+data nascita
+  Found in: comune.selargius.ca.it.csv
+
+data_registrazione
+  Found in: faitutto.it.csv
+
+datamod
+  Found in: utenti.csv
+
+descrizione
+  Found in: corpo_mail.csv
+
+escluso_campagna
+  Found in: crmdemo2.csv
+
+fax
+  Found in: crmdemo2.csv, faitutto.it.csv, utenti.csv
+
+iban
+  Found in: drivers.csv
+
+id
+  Found in: sample_mails_www.devpromodeals.com.csv, accessi.csv, installatori.csv...
+
+id_campagna
+  Found in: crmdemo2.csv
+
+id_categoria_ATECO
+  Found in: crmdemo2.csv
+
+id_comune
+  Found in: faitutto.it.csv
+
+id_contatto
+  Found in: crmdemo2.csv
+
+id_customer
+  Found in: ps_customer (2).csv
+
+id_old
+  Found in: sample_edt.it.csv
+
+id_utente
+  Found in: utenti_copia_agosto2014.csv
+
+image
+  Found in: installatori.csv
+
+immagine
+  Found in: faitutto.it.csv
+
+ip
+  Found in: sample_mails_www.devpromodeals.com.csv, accessi.csv
+
+ip_registration_newsletter
+  Found in: ps_customer (2).csv
+
+isActive
+  Found in: drivers.csv
+
+is_super_user
+  Found in: sample_edt.it.csv
+
+lancio_effettuato
+  Found in: crmdemo2.csv
+
+lang
+  Found in: sample_mails_www.devpromodeals.com.csv
+
+latitude
+  Found in: installatori.csv
+
+licensePlate
+  Found in: drivers.csv
+
+limite_prenotazioni_non_pagate
+  Found in: faitutto.it.csv
+
+longitude
+  Found in: installatori.csv
+
+luogo di nascita
+  Found in: comune.selargius.ca.it.csv
+
+municipalityId
+  Found in: drivers.csv
+
+newsletter
+  Found in: ps_customer (2).csv, utenti.csv
+
+note
+  Found in: crmdemo2.csv
+
+offer_translation_id
+  Found in: sample_mails_www.devpromodeals.com.csv
+
+order_id
+  Found in: sample_mails_www.devpromodeals.com.csv
+
+partita_iva
+  Found in: crmdemo2.csv, faitutto.it.csv
+
+passwd
+  Found in: ps_customer (2).csv
+
+password
+  Found in: utenti_copia_agosto2014.csv, sample_edt.it.csv, faitutto.it.csv...
+
+persona_riferimento
+  Found in: crmdemo2.csv
+
+pin
+  Found in: drivers.csv
+
+ragione_sociale
+  Found in: crmdemo2.csv, faitutto.it.csv
+
+remember_token
+  Found in: sample_edt.it.csv
+
+settore
+  Found in: utenti.csv
+
+taxiLicense
+  Found in: drivers.csv
+
+taxiModel
+  Found in: drivers.csv
+
+taxiType
+  Found in: drivers.csv
+
+tipo
+  Found in: faitutto.it.csv
+
+tipo_riferimento
+  Found in: crmdemo2.csv
+
+tipo_utente
+  Found in: utenti_copia_agosto2014.csv
+
+titolo
+  Found in: corpo_mail.csv
+
+ufficio_rif
+  Found in: utenti_copia_agosto2014.csv
+
+updated_at
+  Found in: sample_mails_www.devpromodeals.com.csv
+
+verified_at
+  Found in: sample_mails_www.devpromodeals.com.csv
+
+web
+  Found in: installatori.csv, crmdemo2.csv
+
+website
+  Found in: utenti.csv
