@@ -7,6 +7,7 @@ setup(
     install_requires=[
         "python-dotenv",
         "requests",
+        "tqdm",
     ],
     entry_points={
         'console_scripts': [
