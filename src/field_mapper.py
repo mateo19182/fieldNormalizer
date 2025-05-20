@@ -5,8 +5,9 @@ between original file headers and normalized output fields.
 """
 import json
 import os
+import re
 from typing import Dict, List, Set, Any, Optional
-from src.field_normalizer import get_field_type, normalize_field_name
+from src.field_normalizer import get_field_type, normalize_field_name, FIELD_PATTERNS
 
 # Default target field categories
 DEFAULT_TARGET_FIELDS = ['name', 'lastname', 'email', 'phone', 'address', 'username']
@@ -17,94 +18,96 @@ class FieldMapper:
     Handles cases where multiple input fields map to the same output field.
     """
     
-    def __init__(self, target_fields: List[str] = None):
+    def __init__(self, target_fields: List[str], custom_patterns: Optional[Dict[str, List[str]]] = None):
         """
-        Initialize the Field Mapper.
+        Initialize the Field Mapper with target fields.
         
         Args:
-            target_fields: Optional list of target fields to use (defaults to DEFAULT_TARGET_FIELDS)
+            target_fields: List of target fields to map source fields to
+            custom_patterns: Optional dictionary of custom field patterns to use instead of defaults
         """
-        self.target_fields = target_fields or DEFAULT_TARGET_FIELDS
+        self.target_fields = target_fields
         self.file_mappings: Dict[str, Dict[str, str]] = {}
+        self.field_patterns = custom_patterns or FIELD_PATTERNS
         
-    def build_mappings(self, file_metadata: List[Dict[str, Any]]) -> None:
+    def get_field_type(self, field_name: str) -> str:
         """
-        Build field mappings for all files based on their headers.
+        Determine the field type based on the field name patterns.
         
         Args:
-            file_metadata: List of dicts with file metadata including headers
-        """
-        for file_info in file_metadata:
-            file_path = file_info['path']
-            headers = file_info['headers']
-            
-            # Create mapping for this file
-            self.file_mappings[file_path] = {}
-            
-            # Map each header to a normalized field type
-            for header in headers:
-                field_type = get_field_type(header)
-                
-                # Only include fields we care about (those in target_fields)
-                if field_type in self.target_fields:
-                    self.file_mappings[file_path][header] = field_type
-    
-    def save_mappings(self, output_path: str) -> None:
-        """
-        Save the field mappings to a JSON file.
-        
-        Args:
-            output_path: Path to save the mappings file
-        """
-        # Convert file paths to relative paths if possible
-        formatted_mappings = {}
-        
-        for file_path, mappings in self.file_mappings.items():
-            # Use basename for cleaner output, but keep full path as a comment
-            basename = os.path.basename(file_path)
-            formatted_mappings[basename] = {
-                "_full_path": file_path,  # Keep the full path as metadata
-                "mappings": mappings
-            }
-        
-        with open(output_path, 'w', encoding='utf-8') as f:
-            json.dump(formatted_mappings, f, indent=2)
-    
-    def load_mappings(self, input_path: str) -> None:
-        """
-        Load field mappings from a JSON file.
-        
-        Args:
-            input_path: Path to the mappings file
-        """
-        with open(input_path, 'r', encoding='utf-8') as f:
-            formatted_mappings = json.load(f)
-        
-        # Convert back to our internal format
-        self.file_mappings = {}
-        for basename, data in formatted_mappings.items():
-            full_path = data.get("_full_path", basename)
-            self.file_mappings[full_path] = data["mappings"]
-            
-            # Collect all unique target fields from the loaded mappings
-            unique_targets = set()
-            for _, target in data["mappings"].items():
-                unique_targets.add(target)
-            
-            # Update target_fields to include all fields found in the mappings
-            self.target_fields = list(set(self.target_fields) | unique_targets)
-    
-    def get_field_mapping(self, file_path: str) -> Dict[str, str]:
-        """
-        Get the field mapping for a specific file.
-        
-        Args:
-            file_path: Path to the file
+            field_name: The field name to analyze
             
         Returns:
-            Dictionary mapping original headers to normalized field types
+            Field type from target_fields or 'other' if no match found
         """
-        return self.file_mappings.get(file_path, {})
+        normalized = normalize_field_name(field_name)
+        
+        for field_type, patterns in self.field_patterns.items():
+            if field_type not in self.target_fields:
+                continue
+            for pattern in patterns:
+                if re.search(pattern, normalized, re.IGNORECASE):
+                    return field_type
+        
+        return 'other'
+    
+    def create_mappings(self, file_metadata: List[Dict[str, Any]]) -> None:
+        """
+        Create mappings for each file based on its headers.
+        
+        Args:
+            file_metadata: List of dictionaries containing file metadata including headers
+        """
+        for metadata in file_metadata:
+            file_path = metadata['path']
+            headers = metadata['headers']
+            
+            # Create mappings for this file
+            mappings = {}
+            for header in headers:
+                field_type = self.get_field_type(header)
+                if field_type != 'other':
+                    mappings[header] = field_type
+            
+            # Only store mappings if we found at least 2 fields
+            if len(mappings) >= 2:
+                self.file_mappings[file_path] = mappings
+    
+    def save_mappings(self, output_file: str) -> None:
+        """
+        Save mappings to a JSON file.
+        
+        Args:
+            output_file: Path to the output file
+        """
+        with open(output_file, 'w') as f:
+            json.dump({
+                'target_fields': self.target_fields,
+                'field_patterns': self.field_patterns,
+                'mappings': self.file_mappings
+            }, f, indent=2)
+    
+    def load_mappings(self, input_file: str) -> None:
+        """
+        Load mappings from a JSON file.
+        
+        Args:
+            input_file: Path to the input file
+        """
+        with open(input_file, 'r') as f:
+            data = json.load(f)
+            self.target_fields = data.get('target_fields', [])
+            self.field_patterns = data.get('field_patterns', FIELD_PATTERNS)
+            self.file_mappings = data.get('mappings', {})
+    
+    def get_mappings(self) -> Dict[str, Dict[str, str]]:
+        """
+        Get the current mappings.
+        
+        Returns:
+            Dictionary mapping file paths to field mappings
+        """
+        return self.file_mappings
     
     def get_inverse_mapping(self, file_path: str) -> Dict[str, List[str]]:
         """
@@ -117,7 +120,7 @@ class FieldMapper:
         Returns:
             Dictionary mapping normalized field types to lists of original headers
         """
-        mapping = self.get_field_mapping(file_path)
+        mapping = self.get_mappings().get(file_path, {})
         inverse_mapping: Dict[str, List[str]] = {field: [] for field in self.target_fields}
         
         for header, field_type in mapping.items():
@@ -166,19 +169,20 @@ class FieldMapper:
         return stats
 
 
-def create_field_mappings(file_metadata: List[Dict[str, Any]], target_fields: List[str] = None) -> FieldMapper:
+def create_field_mappings(file_metadata: List[Dict[str, Any]], target_fields: List[str], custom_patterns: Optional[Dict[str, List[str]]] = None) -> FieldMapper:
     """
     Create field mappings from file metadata.
     
     Args:
-        file_metadata: List of dicts with file metadata including headers
-        target_fields: Optional list of target fields to use (defaults to DEFAULT_TARGET_FIELDS)
+        file_metadata: List of dictionaries containing file metadata including headers
+        target_fields: List of target fields to map to
+        custom_patterns: Optional dictionary of custom field patterns to use
         
     Returns:
         FieldMapper instance with the mappings
     """
-    mapper = FieldMapper(target_fields)
-    mapper.build_mappings(file_metadata)
+    mapper = FieldMapper(target_fields, custom_patterns)
+    mapper.create_mappings(file_metadata)
     return mapper
 
 

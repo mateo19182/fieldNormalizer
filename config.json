@@ -1,0 +1,13 @@
+{
+    "target_fields": [
+        "name",
+        "email",
+        "phone",
+        "address",
+        "company",
+        "title"
+    ],
+    "data_description": "Looking for customer contact information from various data sources",
+    "field_patterns": {
+    }
+} 

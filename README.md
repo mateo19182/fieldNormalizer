@@ -198,6 +198,94 @@ This description helps the AI understand:
 
 This can significantly improve the accuracy of file relevance determination and field mapping.
 
+## Configuration File
+
+Field Normalizer supports loading configuration from a JSON file. This allows you to specify target fields, data descriptions, and custom field patterns in a reusable format. To use a configuration file, specify it with the `--config` option:
+
+```bash
+field-normalizer analyze /path/to/data --config config.json
+```
+
+### Configuration File Format
+
+The configuration file should be a JSON file with the following structure:
+
+```json
+{
+    "target_fields": [
+        "name",
+        "email",
+        "phone",
+        "address",
+        "company",
+        "title"
+    ],
+    "data_description": "Looking for customer contact information from various data sources",
+    "field_patterns": {
+        "name": [
+            "^name$",
+            "first.?name",
+            "full.?name"
+        ],
+        "email": [
+            "email",
+            "e.?mail"
+        ],
+        "phone": [
+            "phone",
+            "tel",
+            "mobile"
+        ],
+        "address": [
+            "address",
+            "street",
+            "city"
+        ],
+        "company": [
+            "company",
+            "organization",
+            "employer"
+        ],
+        "title": [
+            "title",
+            "job.?title",
+            "position"
+        ]
+    }
+}
+```
+
+#### Configuration Options
+
+- `target_fields`: List of target fields to map source fields to
+- `data_description`: Description of the data you are looking for (used by AI-based mapping)
+- `field_patterns`: Dictionary mapping field types to lists of regex patterns for matching field names
+
+When using a configuration file:
+1. If `--use-ai` is specified, the AI will use the `target_fields` and `data_description` from the config file
+2. If not using AI, the tool will use the `field_patterns` from the config file for regex-based matching
+3. Command line arguments take precedence over config file settings
+
+### Examples
+
+#### Using Configuration File with AI
+```bash
+# Use AI with settings from config file
+field-normalizer analyze /path/to/data --config config.json --use-ai
+
+# Override config file settings with command line arguments
+field-normalizer analyze /path/to/data --config config.json --use-ai --target-fields name email phone
+```
+
+#### Using Configuration File without AI
+```bash
+# Use regex patterns from config file
+field-normalizer analyze /path/to/data --config config.json
+
+# Use custom patterns for specific fields
+field-normalizer analyze /path/to/data --config custom_patterns.json
+```
+
 ## Internal Architecture
 
 ### Core Components

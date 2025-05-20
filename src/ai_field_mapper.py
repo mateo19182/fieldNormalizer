@@ -385,13 +385,9 @@ JSON response:
             # Add header row
             if "headers" in sample_data and sample_data["headers"]:
                 result.append("Header row: " + ", ".join(sample_data["headers"]))
-            
-            # Add data rows
             if "rows" in sample_data and sample_data["rows"]:
-                result.append("\nData rows:")
                 for i, row in enumerate(sample_data["rows"]):
-                    result.append(f"{i+1}: " + ", ".join([str(cell) for cell in row]))
-            
+                    result.append(f"{i+1}: " + ", ".join(str(cell).replace('\n', ' ').replace('\r', '') for cell in row))
             return "\n".join(result)
         
         elif sample_format == "json":
@@ -666,5 +662,93 @@ def format_ai_mappings_report(mapper: AIFieldMapper) -> str:
             headers = inverse_mapping.get(target_field, [])
             if headers:
                 lines.append(f"{target_field}: {', '.join(headers)}")
+    
+    # Add detailed mapping outcomes section
+    lines.append("\n\nDetailed Mapping Outcomes:")
+    lines.append("=" * 80)
+    
+    # Track different categories of files
+    mapped_files = []
+    too_few_mappings = []
+    ai_rejected = []
+    
+    # Process each file that was analyzed
+    for file_name, api_data in mapper.api_responses.items():
+        try:
+            # First try to find JSON object in the response if it's not a clean JSON
+            import re
+            content = api_data["response"]
+            json_match = re.search(r'\{.*\}', content, re.DOTALL)
+            if json_match:
+                content = json_match.group(0)
+            
+            response_data = json.loads(content)
+            is_relevant = response_data.get("is_relevant", False)
+            reason = response_data.get("reason", "No reason provided")
+            
+            # Get the file path if it exists in mappings
+            file_path = next((path for path in mapper.file_mappings if os.path.basename(path) == file_name), None)
+            
+            if not is_relevant:
+                # File was rejected by AI
+                ai_rejected.append((file_name, reason))
+            elif file_path:
+                mappings = mapper.file_mappings[file_path]
+                if len(mappings) >= 2:
+                    mapped_files.append((file_name, mappings))
+                else:
+                    too_few_mappings.append((file_name, reason))
+            else:
+                # This shouldn't happen, but just in case
+                too_few_mappings.append((file_name, "No mappings found despite being marked as relevant"))
+                
+        except (json.JSONDecodeError, KeyError) as e:
+            # If we can't parse the response, try to extract the reason from the raw response
+            content = api_data["response"]
+            # Look for common patterns in the response
+            if "deemed irrelevant" in content.lower():
+                # Try to extract the reason after "deemed irrelevant:"
+                match = re.search(r'deemed irrelevant:\s*(.*?)(?:\n|$)', content, re.IGNORECASE)
+                if match:
+                    reason = match.group(1).strip()
+                    ai_rejected.append((file_name, reason))
+                else:
+                    ai_rejected.append((file_name, "File was deemed irrelevant but reason could not be extracted"))
+            else:
+                ai_rejected.append((file_name, f"Error parsing response: {str(e)}"))
+    
+    # Report successfully mapped files
+    if mapped_files:
+        lines.append("\nSuccessfully Mapped Files:")
+        lines.append("-" * 40)
+        for file_name, mappings in mapped_files:
+            lines.append(f"\n{file_name}")
+            lines.append(f"  Mapped {len(mappings)} fields:")
+            for source, target in mappings.items():
+                lines.append(f"    - {source} -> {target}")
+    
+    # Report files with too few mappings
+    if too_few_mappings:
+        lines.append("\nFiles with Too Few Mappings (< 2):")
+        lines.append("-" * 40)
+        for file_name, reason in too_few_mappings:
+            lines.append(f"\n{file_name}")
+            lines.append(f"  Reason: {reason}")
+    
+    # Report files rejected by AI
+    if ai_rejected:
+        lines.append("\nFiles Rejected by AI:")
+        lines.append("-" * 40)
+        for file_name, reason in ai_rejected:
+            lines.append(f"\n{file_name}")
+            lines.append(f"  Reason: {reason}")
+    
+    # Add summary statistics
+    lines.append("\nMapping Outcomes Summary:")
+    lines.append("-" * 40)
+    lines.append(f"Total files processed: {len(mapper.api_responses)}")
+    lines.append(f"Successfully mapped: {len(mapped_files)}")
+    lines.append(f"Too few mappings: {len(too_few_mappings)}")
+    lines.append(f"Rejected by AI: {len(ai_rejected)}")
     
     return "\n".join(lines) 

@@ -10,7 +10,7 @@ from typing import List, Set, Tuple
 from .infer_headers import sample_csv_data, generate_headers_with_openrouter, update_csv_with_headers
 
 
-def extract_headers_from_file(file_path: str) -> Tuple[Set[str], bool]:
+def extract_headers_from_file(file_path: str) -> Tuple[List[str], bool]:
     """
     Extract headers from a data file based on its extension.
     
@@ -18,7 +18,7 @@ def extract_headers_from_file(file_path: str) -> Tuple[Set[str], bool]:
         file_path: Path to the data file
         
     Returns:
-        Tuple of (set of headers found in the file, were_headers_inferred)
+        Tuple of (list of headers found in the file, were_headers_inferred)
     """
     _, ext = os.path.splitext(file_path)
     ext = ext.lower().lstrip('.')
@@ -58,7 +58,7 @@ def has_valid_headers(headers: List[str]) -> bool:
             return False
     return True
 
-def extract_headers_from_csv(file_path: str) -> Tuple[Set[str], bool]:
+def extract_headers_from_csv(file_path: str) -> Tuple[List[str], bool]:
     """
     Extract headers from a CSV file or JSON-formatted content in a .csv file.
     
@@ -66,7 +66,7 @@ def extract_headers_from_csv(file_path: str) -> Tuple[Set[str], bool]:
         file_path: Path to the file (may be CSV or JSON with .csv extension)
         
     Returns:
-        Tuple of (set of column headers or JSON keys, were_headers_inferred)
+        Tuple of (list of column headers or JSON keys, were_headers_inferred)
     """
     with open(file_path, 'r', newline='', encoding='utf-8', errors='replace') as f:
         first_line = f.readline().strip()
@@ -80,11 +80,15 @@ def extract_headers_from_csv(file_path: str) -> Tuple[Set[str], bool]:
                 json_content = '[' + ','.join(line.strip() for line in f if line.strip()) + ']'
                 data = json.loads(json_content)
                 
-                # Extract all unique keys from JSON objects
-                headers = set()
+                # Extract all unique keys from JSON objects while preserving order
+                headers = []
+                seen = set()
                 for item in data:
                     if isinstance(item, dict):
-                        headers.update(item.keys())
+                        for key in item.keys():
+                            if key not in seen:
+                                headers.append(key)
+                                seen.add(key)
                 return headers, False  # JSON files don't need header inference
             except (json.JSONDecodeError, UnicodeDecodeError):
                 # If JSON parsing fails, continue with CSV processing
@@ -115,7 +119,7 @@ def extract_headers_from_csv(file_path: str) -> Tuple[Set[str], bool]:
                 
                 # Check if these look like valid headers
                 if has_valid_headers(headers):
-                    return set(headers), False  # Valid headers found, no inference needed
+                    return headers, False  # Valid headers found, no inference needed
                     
                 # If headers don't look valid, try to infer them
                 
@@ -133,17 +137,17 @@ def extract_headers_from_csv(file_path: str) -> Tuple[Set[str], bool]:
                                 print(f"Info: Updated {os.path.basename(file_path)} with inferred headers", file=sys.stderr)
                             except Exception as update_error:
                                 print(f"Warning: Failed to update {file_path} with inferred headers: {str(update_error)}", file=sys.stderr)
-                            return set(inferred_headers), True  # Headers were inferred
+                            return inferred_headers, True  # Headers were inferred
                     except Exception as e:
                         print(f"Warning: Failed to infer headers for {file_path}: {str(e)}", file=sys.stderr)
                 
                 # If inference failed, return the original headers with a warning
                 print(f"Warning: No valid headers found in {os.path.basename(file_path)}, using default column names", file=sys.stderr)
-                return set(headers) if headers else set(), False
+                return headers if headers else [], False
                 
             except StopIteration:
                 # Empty file
-                return set(), False
+                return [], False
                 
         except Exception as e:
             print(f"Error processing {file_path}: {str(e)}", file=sys.stderr)
@@ -152,12 +156,12 @@ def extract_headers_from_csv(file_path: str) -> Tuple[Set[str], bool]:
             reader = csv.reader(f)
             try:
                 headers = next(reader)
-                return (set(headers), False) if has_valid_headers(headers) else (set(), False)
+                return (headers, False) if has_valid_headers(headers) else ([], False)
             except StopIteration:
                 # Empty file or no headers found
-                return set(), False
+                return [], False
 
-def extract_headers_from_json(file_path: str) -> Set[str]:
+def extract_headers_from_json(file_path: str) -> List[str]:
     """
     Extract headers (keys) from a JSON file.
     
@@ -165,17 +169,20 @@ def extract_headers_from_json(file_path: str) -> Set[str]:
         file_path: Path to the JSON file
         
     Returns:
-        Set of all keys found in the JSON structure
+        List of all keys found in the JSON structure, preserving order
     """
     with open(file_path, 'r', encoding='utf-8') as f:
         data = json.load(f)
     
-    headers = set()
+    headers = []
+    seen = set()
     
     def extract_keys(obj, prefix=''):
         if isinstance(obj, dict):
             for key, value in obj.items():
-                headers.add(key)
+                if key not in seen:
+                    headers.append(key)
+                    seen.add(key)
                 if isinstance(value, (dict, list)):
                     extract_keys(value, f"{prefix}{key}.")
         elif isinstance(obj, list) and obj:
@@ -185,7 +192,7 @@ def extract_headers_from_json(file_path: str) -> Set[str]:
     extract_keys(data)
     return headers
 
-def extract_headers_from_sql(file_path: str) -> Set[str]:
+def extract_headers_from_sql(file_path: str) -> List[str]:
     """
     Extract column names from SQL CREATE TABLE statements.
     
@@ -193,7 +200,7 @@ def extract_headers_from_sql(file_path: str) -> Set[str]:
         file_path: Path to the SQL file
         
     Returns:
-        Set of column names found in CREATE TABLE statements
+        List of column names found in CREATE TABLE statements, preserving order
     """
     with open(file_path, 'r', encoding='utf-8') as f:
         sql_content = f.read()
@@ -202,7 +209,8 @@ def extract_headers_from_sql(file_path: str) -> Set[str]:
     create_table_pattern = r'CREATE\s+TABLE\s+(?:`[^`]+`|\w+)\s*\((.*?)\)(?:\s*ENGINE|\s*;)'
     create_table_matches = re.finditer(create_table_pattern, sql_content, re.IGNORECASE | re.DOTALL)
     
-    headers = set()
+    headers = []
+    seen = set()
     
     for match in create_table_matches:
         # Extract column definitions
@@ -217,6 +225,8 @@ def extract_headers_from_sql(file_path: str) -> Set[str]:
             # Get the column name (either from backtick group or regular group)
             col_name = col_match.group(1) if col_match.group(1) else col_match.group(2)
             if col_name and not col_name.upper() in ('PRIMARY', 'FOREIGN', 'UNIQUE', 'CHECK', 'CONSTRAINT', 'KEY'):
-                headers.add(col_name)
+                if col_name not in seen:
+                    headers.append(col_name)
+                    seen.add(col_name)
     
     return headers

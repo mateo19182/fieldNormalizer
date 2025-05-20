@@ -18,40 +18,61 @@ from src.ai_field_mapper import create_ai_field_mappings, format_ai_mappings_rep
 from src.data_extractor import extract_all_data, write_jsonl
 
 
+def load_config(config_file: str) -> Dict[str, Any]:
+    """
+    Load configuration from a JSON file.
+    
+    Args:
+        config_file: Path to the configuration file
+        
+    Returns:
+        Dictionary containing configuration settings
+    """
+    try:
+        with open(config_file, 'r') as f:
+            config = json.load(f)
+        return config
+    except Exception as e:
+        print(f"Error loading configuration file: {str(e)}", file=sys.stderr)
+        sys.exit(1)
+
+
 def parse_args():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
-        description="Field Normalizer: Extract and process data from various file formats."
+        description="Field Normalizer - Extract and normalize fields from various data sources"
     )
     
-    # Create subparsers for the main operations
-    subparsers = parser.add_subparsers(dest="command", help="Command to execute")
+    subparsers = parser.add_subparsers(dest="command", help="Command to run")
     
-    # Common arguments for both commands
-    common_parser = argparse.ArgumentParser(add_help=False)
-    common_parser.add_argument(
-        "paths",
-        nargs="+",
-        help="One or more directories or files to process",
+    # Common arguments for all commands
+    for cmd_parser in [parser, subparsers.add_parser("analyze"), subparsers.add_parser("extract"), subparsers.add_parser("process")]:
+        cmd_parser.add_argument(
+            "--config",
+            help="Path to configuration file (JSON format)",
+        )
+    
+    # 1. Analyze command - for analyzing files and creating mappings
+    analyze_parser = subparsers.add_parser(
+        "analyze",
+        help="Analyze files and create field mappings"
     )
-    common_parser.add_argument(
-        "--file-types",
-        nargs="+",
-        default=["csv", "json"],
-        help="File extensions to process (default: csv, json, sql)",
-    )
-    common_parser.add_argument(
+    analyze_parser.add_argument(
         "--max-files",
         "-n",
         type=int,
         help="Maximum number of files to process per directory",
     )
-    
-    # 1. Analyze command - for analyzing headers and creating mappings
-    analyze_parser = subparsers.add_parser(
-        "analyze", 
-        parents=[common_parser],
-        help="Analyze files and create field mappings"
+    analyze_parser.add_argument(
+        "--file-types",
+        nargs="+",
+        default=["csv", "json"],
+        help="File types to process (default: csv json sql)",
+    )
+    analyze_parser.add_argument(
+        "paths",
+        nargs="+",
+        help="Paths to analyze (files or directories)",
     )
     analyze_parser.add_argument(
         "--output",
@@ -124,7 +145,6 @@ def parse_args():
     # 3. Process command - combines analyze and extract in one step
     process_parser = subparsers.add_parser(
         "process",
-        parents=[common_parser],
         help="Analyze files and extract data in one step"
     )
     process_parser.add_argument(
@@ -287,6 +307,11 @@ async def async_main():
         print("Error: No command specified. Use 'analyze', 'extract', or 'process'.", file=sys.stderr)
         sys.exit(1)
     
+    # Load configuration if specified
+    config = {}
+    if args.config:
+        config = load_config(args.config)
+    
     # Handle the analyze command
     if args.command == "analyze":
         # Find data files
@@ -303,11 +328,13 @@ async def async_main():
         # Group fields by type
         field_groups = group_fields(all_headers)
         
+        # Get target fields and data description from config or command line
+        target_fields = args.target_fields or config.get('target_fields') or DEFAULT_TARGET_FIELDS
+        data_description = args.data_description or config.get('data_description', "")
+        
         # Create field mappings
         if args.use_ai:
             # Use AI-based field mapping with custom target fields
-            target_fields = args.target_fields or DEFAULT_TARGET_FIELDS
-            data_description = args.data_description or ""
             print(f"Using AI to create field mappings with target fields: {', '.join(target_fields)}")
             if data_description:
                 print(f"Using data description: \"{data_description}\"")
@@ -315,9 +342,12 @@ async def async_main():
             mappings_report = format_ai_mappings_report(mapper)
         else:
             # Use traditional regex-based field mapping
-            target_fields = args.target_fields or DEFAULT_TARGET_FIELDS
             print(f"Creating field mappings with target fields: {', '.join(target_fields)}")
-            mapper = create_field_mappings(file_metadata, target_fields)
+            # If using config file and not AI, use custom field patterns
+            if config and 'field_patterns' in config:
+                mapper = create_field_mappings(file_metadata, target_fields, custom_patterns=config['field_patterns'])
+            else:
+                mapper = create_field_mappings(file_metadata, target_fields)
             mappings_report = format_mappings_report(mapper)
         
         # Save mappings to file
