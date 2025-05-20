@@ -369,3 +369,48 @@ This architecture allows Field Normalizer to handle data files of virtually any 
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
+
+## Utility Scripts
+
+### Delete Rejected Files
+
+The `delete_rejected_files.py` script helps clean up files that were rejected by the AI during the analysis phase. This is useful for removing irrelevant files from your dataset.
+
+#### Usage
+```bash
+python delete_rejected_files.py <analysis_file> <base_directory>
+```
+
+#### Arguments
+- `analysis_file`: Path to the analysis report file (e.g., a.txt)
+- `base_directory`: Directory containing the files to be deleted
+
+#### Example
+```bash
+# Delete rejected files from the analysis report a.txt, looking for files in the it/ directory
+python delete_rejected_files.py a.txt it/
+```
+
+The script will:
+1. Read the analysis file to identify files rejected by AI
+2. Look for these files in the specified base directory
+3. Delete any matching files it finds
+4. Provide a summary of deleted and not-found files
+
+#### Output Example
+```
+Reading analysis file: a.txt
+Base directory for files: it/
+
+Found 2 rejected files:
+- shopping-Rome-C+Italy.csv
+- corpo_mail.csv
+
+Proceeding to delete files...
+Deleted: shopping-Rome-C+Italy.csv
+Deleted: corpo_mail.csv
+
+Summary:
+Successfully deleted: 2 files
+Files not found: 0 files
+```

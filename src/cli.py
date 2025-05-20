@@ -67,7 +67,7 @@ def parse_args():
         "--file-types",
         nargs="+",
         default=["csv", "json"],
-        help="File types to process (default: csv json sql)",
+        help="File types to process (default: csv json, optional: txt, sql)",
     )
     analyze_parser.add_argument(
         "paths",

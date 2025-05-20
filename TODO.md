@@ -7,7 +7,8 @@
 - [ ] Improve memory efficiency for very large files
 - [ ] Implement parallel processing for faster execution
 - [ ] Add support for incremental processing (only process new or changed files)
-- [ ] Add web interface for easier use
+- [ ] web interface ?
 
 
-deduplicate inside records???
+- first step that checks if file is useful
+- second step matches file headers (if available) to target one

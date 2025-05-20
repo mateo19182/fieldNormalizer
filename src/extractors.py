@@ -10,6 +10,30 @@ from typing import List, Set, Tuple
 from .infer_headers import sample_csv_data, generate_headers_with_openrouter, update_csv_with_headers
 
 
+def find_header_row(file_path: str) -> Tuple[int, List[str]]:
+    """
+    Scan a text file to find the first row that looks like valid headers.
+    
+    Args:
+        file_path: Path to the text file
+        
+    Returns:
+        Tuple of (line number where headers were found (0-based), list of headers)
+        If no valid headers found, returns (-1, [])
+    """
+    with open(file_path, 'r', newline='', encoding='utf-8', errors='replace') as f:
+        for i, line in enumerate(f):
+            # Try to parse the line as CSV
+            try:
+                # Try different delimiters
+                for delimiter in [',', '\t', ';', '|']:
+                    headers = [h.strip() for h in line.strip().split(delimiter)]
+                    if has_valid_headers(headers):
+                        return i, headers
+            except:
+                continue
+    return -1, []
+
 def extract_headers_from_file(file_path: str) -> Tuple[List[str], bool]:
     """
     Extract headers from a data file based on its extension.
@@ -31,6 +55,27 @@ def extract_headers_from_file(file_path: str) -> Tuple[List[str], bool]:
     elif ext == 'sql':
         headers = extract_headers_from_sql(file_path)
         return headers, False
+    elif ext == 'txt':
+        # For txt files, first try to find a valid header row
+        header_line, headers = find_header_row(file_path)
+        if header_line >= 0:
+            # Found valid headers, process like CSV but skip to header line
+            with open(file_path, 'r', newline='', encoding='utf-8', errors='replace') as f:
+                # Skip to header line
+                for _ in range(header_line):
+                    next(f)
+                # Read the header line
+                line = next(f)
+                # Try different delimiters
+                for delimiter in [',', '\t', ';', '|']:
+                    try:
+                        headers = [h.strip() for h in line.strip().split(delimiter)]
+                        if has_valid_headers(headers):
+                            return headers, False
+                    except:
+                        continue
+        # If no valid headers found or processing failed, try CSV processing
+        return extract_headers_from_csv(file_path)
     else:
         raise ValueError(f"Unsupported file type: {ext}")
 

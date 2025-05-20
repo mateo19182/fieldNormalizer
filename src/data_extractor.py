@@ -10,6 +10,7 @@ from typing import Dict, List, Set, Any, Iterator, Optional, Tuple
 from tqdm import tqdm
 from src.field_mapper import FieldMapper
 from src.field_normalizer import validate_field_value
+from src.extractors import find_header_row
 
 def extract_data_from_file(file_path: str, field_mapping: Dict[str, List[str]]) -> Iterator[Dict[str, Any]]:
     """
@@ -25,8 +26,8 @@ def extract_data_from_file(file_path: str, field_mapping: Dict[str, List[str]]) 
     _, ext = os.path.splitext(file_path)
     ext = ext.lower().lstrip('.')
     
-    if ext == 'csv':
-        yield from extract_data_from_csv(file_path, field_mapping)
+    if ext in ['csv', 'txt']:
+        yield from extract_data_from_csv(file_path, field_mapping, is_txt=(ext == 'txt'))
     elif ext == 'json':
         yield from extract_data_from_json(file_path, field_mapping)
     elif ext == 'sql':
@@ -34,26 +35,42 @@ def extract_data_from_file(file_path: str, field_mapping: Dict[str, List[str]]) 
     else:
         print(f"Warning: Unsupported file type: {ext}, skipping {file_path}", file=sys.stderr)
 
-def extract_data_from_csv(file_path: str, field_mapping: Dict[str, List[str]]) -> Iterator[Dict[str, Any]]:
+def extract_data_from_csv(file_path: str, field_mapping: Dict[str, List[str]], is_txt: bool = False) -> Iterator[Dict[str, Any]]:
     """
-    Extract data from a CSV file based on field mappings.
+    Extract data from a CSV or TXT file based on field mappings.
     
     Args:
-        file_path: Path to the CSV file
+        file_path: Path to the CSV/TXT file
         field_mapping: Mapping of normalized field types to lists of original headers
+        is_txt: Whether this is a txt file (affects header detection)
         
     Yields:
         Dictionaries containing extracted data with normalized field names
     """
     try:
         with open(file_path, 'r', newline='', encoding='utf-8', errors='replace') as f:
+            # For txt files, first try to find a valid header row
+            header_line = 0
+            if is_txt:
+                header_line, _ = find_header_row(file_path)
+                if header_line < 0:
+                    print(f"Warning: No valid headers found in {file_path}, skipping", file=sys.stderr)
+                    return
+                # Skip to header line
+                for _ in range(header_line):
+                    next(f)
+            
             # Try to detect dialect
             sample = f.read(4096)
             f.seek(0)
+            if is_txt:
+                # Skip to header line again after reading sample
+                for _ in range(header_line):
+                    next(f)
             
             try:
                 dialect = csv.Sniffer().sniff(sample)
-                has_header = csv.Sniffer().has_header(sample)
+                has_header = True  # We already found headers for txt files
             except:
                 # If dialect detection fails, use default
                 dialect = csv.excel
@@ -69,6 +86,10 @@ def extract_data_from_csv(file_path: str, field_mapping: Dict[str, List[str]]) -
                 # If no headers, use column indices
                 headers = [f"column_{i}" for i in range(len(next(reader)))]
                 f.seek(0)
+                if is_txt:
+                    # Skip to header line again
+                    for _ in range(header_line):
+                        next(f)
                 reader = csv.reader(f, dialect)
             
             # Create a mapping from column index to normalized field
