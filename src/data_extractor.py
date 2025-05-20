@@ -80,7 +80,7 @@ def extract_data_from_csv(file_path: str, field_mapping: Dict[str, List[str]]) -
                         column_mapping[column_idx] = (field_type, header)
             
             # Process each row
-            for row in tqdm(reader, desc="Extracting rows from CSV", unit="row"):
+            for row in tqdm(reader, desc=f"Extracting rows from {file_path}", unit="row"):
                 if not row or all(cell.strip() == '' for cell in row):
                     continue  # Skip empty rows
                 
@@ -317,111 +317,153 @@ def _process_json_object(obj: Dict[str, Any], field_mapping: Dict[str, List[str]
         record['_source_file'] = os.path.basename(file_path)
         yield record
 
-def extract_all_data(file_paths: List[str], field_mapper: FieldMapper) -> Iterator[Dict[str, Any]]:
+def extract_all_data(file_paths: List[str], field_mapper: Any) -> Iterator[Dict[str, Any]]:
     """
-    Extract data from multiple files based on field mappings.
+    Extract data from all files based on field mappings.
     
     Args:
         file_paths: List of file paths to process
-        field_mapper: FieldMapper instance with mappings
+        field_mapper: FieldMapper or AIFieldMapper instance with mappings
         
     Yields:
         Dictionaries containing extracted data with normalized field names
     """
-    # Add progress bar for file processing
-    for file_path in tqdm(file_paths, desc="Extracting data", unit="file"):
-        # Get inverse mapping (field_type -> [original_headers])
+    # Track files with only one mapping (these are often not useful)
+    single_mapping_files = []
+    
+    # Process each file
+    for file_path in file_paths:
+        # Get inverse mapping for this file (field type -> list of original headers)
         inverse_mapping = field_mapper.get_inverse_mapping(file_path)
         
-        # Skip files with no mappings
-        if not any(headers for headers in inverse_mapping.values()):
-            print(f"Skipping {file_path} - no field mappings found")
+        # Skip files with only one mapping (these are often not useful)
+        total_mappings = sum(len(headers) for headers in inverse_mapping.values())
+        if total_mappings <= 1:
+            single_mapping_files.append(file_path)
             continue
         
         # Extract data from this file
         try:
             for record in extract_data_from_file(file_path, inverse_mapping):
-                yield record
+                if record:  # Only yield non-empty records
+                    yield record
         except Exception as e:
-            print(f"Error processing {file_path}: {str(e)}", file=sys.stderr)
+            print(f"Error extracting data from {file_path}: {str(e)}", file=sys.stderr)
+    
+    # Report files with only one mapping
+    if single_mapping_files:
+        print(f"\nSkipped {len(single_mapping_files)} files with only one mapping:", file=sys.stderr)
+        for file_path in single_mapping_files[:5]:
+            print(f"  - {os.path.basename(file_path)}", file=sys.stderr)
+        if len(single_mapping_files) > 5:
+            print(f"  - ... and {len(single_mapping_files) - 5} more", file=sys.stderr)
 
 def merge_records_by_email(records: Iterator[Dict[str, Any]]) -> Iterator[Dict[str, Any]]:
     """
-    Merge records that share the same email address.
+    Merge records with the same email address.
     
     Args:
         records: Iterator of record dictionaries
         
     Yields:
-        Merged records with unique email addresses
+        Merged record dictionaries
     """
-    email_records = {}
+    # Buffer to store records by email
+    email_records: Dict[str, Dict[str, Any]] = {}
+    record_count = 0
     
-    # First pass: group records by email
-    # Convert to list to enable progress bar
-    records_list = list(records)
-    for record in tqdm(records_list, desc="Grouping by email", unit="record"):
+    # Process each record
+    for record in records:
+        record_count += 1
+        
+        # Skip records without email
         if 'email' not in record:
-            # If no email, treat as a unique record
             yield record
             continue
         
         email = record['email']
-        # Handle case where email is a list (should be rare)
-        if isinstance(email, list):
-            email = email[0] if email else None
         
+        # Skip empty emails
         if not email:
-            # Skip records with empty email
             yield record
             continue
         
-        # Normalize email to lowercase
-        email = email.lower()
-        
-        if email in email_records:
+        # If this is the first record with this email, store it
+        if email not in email_records:
+            email_records[email] = record
+        else:
             # Merge with existing record
             existing = email_records[email]
             
-            # Merge source files
-            sources = set([existing.get('_source_file', '')])
-            if '_source_file' in record:
-                sources.add(record['_source_file'])
-            existing['_source_file'] = ', '.join(filter(None, sources))
-            
-            # Merge all other fields
+            # Merge all fields
             for field, value in record.items():
-                if field == '_source_file' or field == 'email':
-                    continue
-                
-                if field in existing:
-                    # Both records have this field
-                    existing_val = existing[field]
-                    
-                    # Convert to lists if not already
-                    if not isinstance(existing_val, list):
-                        existing_val = [existing_val]
-                    if not isinstance(value, list):
-                        value = [value]
-                    
-                    # Combine and deduplicate
-                    combined = existing_val + value
-                    # Remove duplicates while preserving order
-                    seen = set()
-                    deduped = [x for x in combined if not (x in seen or seen.add(x))]
-                    
-                    # Update the field
-                    existing[field] = deduped
-                else:
-                    # Only the new record has this field
+                if field == '_source_file':
+                    # Combine source files
+                    if field in existing:
+                        if isinstance(existing[field], list):
+                            if value not in existing[field]:
+                                existing[field].append(value)
+                        else:
+                            if existing[field] != value:
+                                existing[field] = [existing[field], value]
+                    else:
+                        existing[field] = value
+                elif field not in existing:
+                    # Add new field
                     existing[field] = value
-        else:
-            # New email, store the record
-            email_records[email] = record.copy()
+                else:
+                    # Merge field values
+                    if isinstance(existing[field], list):
+                        if isinstance(value, list):
+                            # Both are lists, extend
+                            for item in value:
+                                if item not in existing[field]:
+                                    existing[field].append(item)
+                        else:
+                            # Existing is list, value is scalar
+                            if value not in existing[field]:
+                                existing[field].append(value)
+                    else:
+                        if isinstance(value, list):
+                            # Existing is scalar, value is list
+                            if existing[field] not in value:
+                                value.insert(0, existing[field])
+                            existing[field] = value
+                        else:
+                            # Both are scalars
+                            if existing[field] != value:
+                                existing[field] = [existing[field], value]
+        
+        # Periodically yield records to avoid memory buildup
+        if record_count % 10000 == 0:
+            # Yield records for emails that haven't been seen recently
+            emails_to_yield = list(email_records.keys())[:len(email_records) // 2]
+            for email in emails_to_yield:
+                yield email_records.pop(email)
     
-    # Second pass: yield all merged records
+    # Yield remaining records
     for record in email_records.values():
         yield record
+
+def deduplicate_record_values(record: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Deduplicate values within a single record.
+    
+    Args:
+        record: Dictionary containing record data
+        
+    Returns:
+        Record with deduplicated values
+    """
+    deduplicated = {}
+    for field, value in record.items():
+        if isinstance(value, list):
+            # Convert to set and back to list to deduplicate
+            # Preserve order by using dict.fromkeys
+            deduplicated[field] = list(dict.fromkeys(value))
+        else:
+            deduplicated[field] = value
+    return deduplicated
 
 def deduplicate_records(records: Iterator[Dict[str, Any]]) -> Iterator[Dict[str, Any]]:
     """
@@ -436,6 +478,9 @@ def deduplicate_records(records: Iterator[Dict[str, Any]]) -> Iterator[Dict[str,
     seen_records = set()
     
     for record in records:
+        # First deduplicate values within the record
+        record = deduplicate_record_values(record)
+        
         # Create a hashable representation of the record for deduplication
         # We exclude the _source_file field from the hash to deduplicate across files
         record_hash = hash(frozenset({

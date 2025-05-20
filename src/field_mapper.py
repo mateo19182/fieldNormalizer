@@ -8,8 +8,8 @@ import os
 from typing import Dict, List, Set, Any, Optional
 from src.field_normalizer import get_field_type, normalize_field_name
 
-# Target field categories we care about
-TARGET_FIELDS = ['name', 'email', 'phone', 'address']
+# Default target field categories
+DEFAULT_TARGET_FIELDS = ['name', 'lastname', 'email', 'phone', 'address', 'username']
 
 class FieldMapper:
     """
@@ -17,7 +17,14 @@ class FieldMapper:
     Handles cases where multiple input fields map to the same output field.
     """
     
-    def __init__(self):
+    def __init__(self, target_fields: List[str] = None):
+        """
+        Initialize the Field Mapper.
+        
+        Args:
+            target_fields: Optional list of target fields to use (defaults to DEFAULT_TARGET_FIELDS)
+        """
+        self.target_fields = target_fields or DEFAULT_TARGET_FIELDS
         self.file_mappings: Dict[str, Dict[str, str]] = {}
         
     def build_mappings(self, file_metadata: List[Dict[str, Any]]) -> None:
@@ -38,8 +45,8 @@ class FieldMapper:
             for header in headers:
                 field_type = get_field_type(header)
                 
-                # Only include fields we care about (name, email, phone, address)
-                if field_type in TARGET_FIELDS:
+                # Only include fields we care about (those in target_fields)
+                if field_type in self.target_fields:
                     self.file_mappings[file_path][header] = field_type
     
     def save_mappings(self, output_path: str) -> None:
@@ -78,6 +85,14 @@ class FieldMapper:
         for basename, data in formatted_mappings.items():
             full_path = data.get("_full_path", basename)
             self.file_mappings[full_path] = data["mappings"]
+            
+            # Collect all unique target fields from the loaded mappings
+            unique_targets = set()
+            for _, target in data["mappings"].items():
+                unique_targets.add(target)
+            
+            # Update target_fields to include all fields found in the mappings
+            self.target_fields = list(set(self.target_fields) | unique_targets)
     
     def get_field_mapping(self, file_path: str) -> Dict[str, str]:
         """
@@ -103,7 +118,7 @@ class FieldMapper:
             Dictionary mapping normalized field types to lists of original headers
         """
         mapping = self.get_field_mapping(file_path)
-        inverse_mapping: Dict[str, List[str]] = {field: [] for field in TARGET_FIELDS}
+        inverse_mapping: Dict[str, List[str]] = {field: [] for field in self.target_fields}
         
         for header, field_type in mapping.items():
             if field_type in inverse_mapping:
@@ -138,7 +153,7 @@ class FieldMapper:
         """
         stats = {
             "total_files": len(self.file_mappings),
-            "field_counts": {field: 0 for field in TARGET_FIELDS},
+            "field_counts": {field: 0 for field in self.target_fields},
             "unmapped_headers": 0
         }
         
@@ -151,17 +166,18 @@ class FieldMapper:
         return stats
 
 
-def create_field_mappings(file_metadata: List[Dict[str, Any]]) -> FieldMapper:
+def create_field_mappings(file_metadata: List[Dict[str, Any]], target_fields: List[str] = None) -> FieldMapper:
     """
     Create field mappings from file metadata.
     
     Args:
         file_metadata: List of dicts with file metadata including headers
+        target_fields: Optional list of target fields to use (defaults to DEFAULT_TARGET_FIELDS)
         
     Returns:
         FieldMapper instance with the mappings
     """
-    mapper = FieldMapper()
+    mapper = FieldMapper(target_fields)
     mapper.build_mappings(file_metadata)
     return mapper
 
@@ -201,7 +217,7 @@ def format_mappings_report(mapper: FieldMapper) -> str:
         # Group by normalized field type
         inverse_mapping = mapper.get_inverse_mapping(file_path)
         
-        for field_type in TARGET_FIELDS:
+        for field_type in mapper.target_fields:
             headers = inverse_mapping.get(field_type, [])
             if headers:
                 lines.append(f"{field_type}: {', '.join(headers)}")

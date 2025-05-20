@@ -8,7 +8,7 @@ Field Normalizer provides a two-step workflow:
 1. **Analyze**: Extract and normalize headers from data files, categorizing them by field type and creating field mappings
 2. **Extract**: Generate a JSONL file containing the actual data from fields matching specific categories
 
-This tool is designed to handle large files and process data in a memory-efficient manner, making it suitable for batch processing of substantial datasets. It also provides smart features like deduplication, merging records with the same email, and ignoring NULL values.
+This tool is designed to handle large files and process data in a memory-efficient manner, making it suitable for batch processing of substantial datasets. It also provides smart features like deduplication, merging records with the same email, and ignoring NULL values. Files with only one mapping are automatically ignored during the extract phase to ensure data quality.
 
 ## Installation
 
@@ -23,7 +23,7 @@ cd fieldNormalizer
 pip install -e .
 ```
 
-Create a .env file in the root directory of the project with the following content if you want to infer headers with AI for files missing them:
+Create a .env file in the root directory of the project with the following content if you want to use AI-based field mapping:
 
 ```bash
 OPENROUTER_API_KEY=your_api_key_here
@@ -47,6 +47,9 @@ field-normalizer analyze [OPTIONS] PATHS...
 - `--no-normalize` - Disable field normalization (enabled by default)
 - `--no-variations` - Disable showing field variations (enabled by default)
 - `--mappings-output` - Output file for field mappings (default: mappings.json)
+- `--use-ai` - Use AI to create field mappings (requires OPENROUTER_API_KEY in .env file)
+- `--target-fields` - Custom target fields to map to (default: name, email, phone, address)
+- `--data-description` - Description of the data you are looking for (helps AI determine file relevance)
 
 #### Step 2: Extract Command
 ```bash
@@ -57,6 +60,8 @@ field-normalizer extract [OPTIONS]
 - `--mappings` - Field mappings file (default: mappings.json)
 - `--output, -o` - Output file for extracted data (default: extracted_data.jsonl)
 - `--batch-size` - Batch size for writing records (default: 1000)
+- `--group-by-email` - Group records by email address (disabled by default)
+- `--use-ai` - Use AI-based field mappings (requires OPENROUTER_API_KEY in .env file)
 
 ### Option 2: One-Step Workflow (Process)
 
@@ -73,6 +78,10 @@ field-normalizer process [OPTIONS] PATHS...
 - `--batch-size` - Batch size for writing records (default: 1000)
 - `--no-normalize` - Disable field normalization (enabled by default)
 - `--no-variations` - Disable showing field variations (enabled by default)
+- `--group-by-email` - Group records by email address (disabled by default)
+- `--use-ai` - Use AI to create field mappings (requires OPENROUTER_API_KEY in .env file)
+- `--target-fields` - Custom target fields to map to (default: name, email, phone, address)
+- `--data-description` - Description of the data you are looking for (helps AI determine file relevance)
 
 ### Examples
 
@@ -91,6 +100,15 @@ field-normalizer analyze /path/to/data --output analysis_report.txt
 
 # Disable normalization or variations
 field-normalizer analyze /path/to/data --no-normalize --output raw_headers.txt
+
+# Use AI-based field mapping with default target fields
+field-normalizer analyze /path/to/data --use-ai
+
+# Use AI-based field mapping with custom target fields
+field-normalizer analyze /path/to/data --use-ai --target-fields name email phone address company title
+
+# Use AI-based field mapping with data description to improve relevance detection
+field-normalizer analyze /path/to/data --use-ai --data-description "Looking for customer contact data from e-commerce transactions"
 ```
 
 ##### Step 2: Extract Data Using Mappings
@@ -103,6 +121,9 @@ field-normalizer extract --output contacts.jsonl
 
 # Use a different mappings file
 field-normalizer extract --mappings custom_mappings.json
+
+# Extract data using AI-based field mappings
+field-normalizer extract --use-ai
 ```
 
 #### One-Step Workflow
@@ -115,13 +136,73 @@ field-normalizer process /path/to/data --analysis-output report.txt --extract-ou
 
 # Process specific file types with a limit
 field-normalizer process /path/to/data --file-types csv json --max-files 50
+
+# Use AI-based field mapping with custom target fields and data description
+field-normalizer process /path/to/data --use-ai --target-fields name email phone address company title --data-description "Looking for customer support tickets with contact information"
 ```
+
+## Field Mapping Strategies
+
+Field Normalizer supports two strategies for mapping source fields to target fields:
+
+### 1. Regex-Based Mapping (Default)
+
+The default strategy uses regular expressions to match field names against predefined patterns. This approach is fast and works without any external dependencies.
+
+- **Pros**: Works offline, consistent results, no API costs
+- **Cons**: Limited to predefined patterns, may miss complex or unusual field names
+
+### 2. AI-Based Mapping
+
+When enabled with the `--use-ai` flag, Field Normalizer uses AI to map source fields to target fields. This approach can handle a wider variety of field names and is especially useful when working with arbitrary target fields.
+
+- **Pros**: More accurate mapping, handles arbitrary target fields, understands context
+- **Cons**: Requires an API key, may incur costs, requires internet connection
+
+The AI-based mapping strategy analyzes:
+1. **Field names** - Maps source fields to target fields based on semantic understanding
+2. **Sample data** - Examines actual values to determine field relevance
+3. **File context** - Uses filename and data patterns to determine if a file is relevant
+4. **User description** - Uses your description of the data you're looking for to improve relevance detection
+
+Files with fewer than 2 mappings or deemed irrelevant to your target data are automatically skipped.
+
+To use AI-based mapping, you must provide an OpenRouter API key in a `.env` file in the project root:
+
+```bash
+OPENROUTER_API_KEY=your_api_key_here
+```
+
+## Custom Target Fields
+
+By default, Field Normalizer maps source fields to four predefined target fields: name, email, phone, and address. However, you can specify custom target fields using the `--target-fields` option:
+
+```bash
+field-normalizer analyze /path/to/data --target-fields name email phone address company title department salary
+```
+
+This is especially powerful when combined with AI-based mapping, as the AI can intelligently map source fields to any arbitrary target fields you specify.
+
+## Specifying Data Description
+
+When using AI-based mapping, you can provide a description of the data you're looking for to help the AI determine file relevance:
+
+```bash
+field-normalizer analyze /path/to/data --use-ai --data-description "Looking for customer support tickets with contact information"
+```
+
+This description helps the AI understand:
+- What type of data you're interested in
+- The context or domain of the data
+- Specific attributes that make a file relevant to your needs
+
+This can significantly improve the accuracy of file relevance determination and field mapping.
 
 ## Internal Architecture
 
 ### Core Components
 
-The Field Normalizer is built around four main components:
+The Field Normalizer is built around five main components:
 
 1. **CLI Interface** (`cli.py`): 
    - Handles command-line arguments and orchestrates the workflow
@@ -138,10 +219,13 @@ The Field Normalizer is built around four main components:
    - Contains pattern-matching logic to categorize fields
    - Groups similar fields by type (name, email, phone, address)
 
-4. **Field Mapper** (`field_mapper.py`):
+4. **Field Mapper** (`field_mapper.py` and `ai_field_mapper.py`):
    - Creates and manages mappings between original headers and normalized categories
    - Handles saving/loading mappings to/from JSON files
    - Provides inverse mappings for data extraction
+   - Supports both regex-based and AI-based mapping strategies
+   - Allows for arbitrary target fields
+   - Analyzes sample data for relevance determination (AI-based)
 
 5. **Data Extractor** (`data_extractor.py`):
    - Extracts data from files based on field mappings
@@ -154,10 +238,11 @@ The Field Normalizer is built around four main components:
 #### Step 1: Analyze (Header Analysis & Mapping)
 1. **File Discovery**: The tool scans specified directories for matching file types
 2. **Header Extraction**: Each file is processed to extract its headers/field names
-3. **Normalization**: Headers are normalized (lowercase, spaces standardized)
-4. **Categorization**: Headers are matched against pattern libraries to identify field types
-5. **Mapping Creation**: Mappings between original headers and normalized categories are created
-6. **Mapping Storage**: Mappings are saved to a JSON file for manual review/editing
+3. **Sample Data Extraction**: For AI-based mapping, sample data is extracted from each file
+4. **Relevance Determination**: AI evaluates if each file contains relevant data based on headers, sample data, and user description
+5. **Field Mapping**: Source fields are mapped to target fields using regex patterns or AI
+6. **Mapping Filtering**: Files with fewer than 2 mappings or deemed irrelevant are filtered out
+7. **Mapping Storage**: Mappings are saved to a JSON file for manual review/editing
 
 #### Step 2: Extract (Data Extraction)
 1. **Mapping Loading**: Field mappings are loaded from the JSON file
@@ -188,6 +273,8 @@ The tool is designed to handle large datasets by:
 3. **Deduplication**: Duplicate records are removed to ensure data quality
 4. **Email-Based Merging**: Records with the same email address are merged to consolidate information
 5. **Source Tracking**: Each record includes information about its source file
+6. **File Relevance Determination**: Files that don't contain relevant data are automatically skipped
+7. **Single Mapping Filtering**: Files with only one mapping are automatically ignored to ensure data quality
 
 This architecture allows Field Normalizer to handle data files of virtually any size with a fixed memory footprint while providing smart data processing capabilities.
 

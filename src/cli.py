@@ -6,12 +6,14 @@ A tool to extract and normalize headers from various data files (CSV, JSON, SQL,
 import argparse
 import os
 import sys
+import json
 from typing import Dict, List, Set, Tuple, Any
 from tqdm import tqdm
 
 from src.extractors import extract_headers_from_file
 from src.field_normalizer import analyze_field_variations, group_fields
-from src.field_mapper import create_field_mappings, format_mappings_report
+from src.field_mapper import create_field_mappings, format_mappings_report, DEFAULT_TARGET_FIELDS, FieldMapper
+from src.ai_field_mapper import create_ai_field_mappings, format_ai_mappings_report, AIFieldMapper
 from src.data_extractor import extract_all_data, write_jsonl
 
 
@@ -41,7 +43,7 @@ def parse_args():
         "--max-files",
         "-n",
         type=int,
-        help="Maximum number of files to process (only applies to directories)",
+        help="Maximum number of files to process per directory",
     )
     
     # 1. Analyze command - for analyzing headers and creating mappings
@@ -70,6 +72,20 @@ def parse_args():
         default="mappings.json",
         help="Output file for field mappings (JSON format)",
     )
+    analyze_parser.add_argument(
+        "--use-ai",
+        action="store_true",
+        help="Use AI to create field mappings (requires OPENROUTER_API_KEY in .env file)",
+    )
+    analyze_parser.add_argument(
+        "--target-fields",
+        nargs="+",
+        help=f"Custom target fields to map to (default: {', '.join(DEFAULT_TARGET_FIELDS)})",
+    )
+    analyze_parser.add_argument(
+        "--data-description",
+        help="Description of the data you are looking for (helps AI determine file relevance)",
+    )
     
     # 2. Extract command - for extracting data using mappings
     extract_parser = subparsers.add_parser(
@@ -97,6 +113,11 @@ def parse_args():
         "--group-by-email",
         action="store_true",
         help="Group records by email address (disabled by default)",
+    )
+    extract_parser.add_argument(
+        "--use-ai",
+        action="store_true",
+        help="Use AI-based field mappings (requires OPENROUTER_API_KEY in .env file)",
     )
     
     # 3. Process command - combines analyze and extract in one step
@@ -141,6 +162,20 @@ def parse_args():
         "--group-by-email",
         action="store_true",
         help="Group records by email address (disabled by default)",
+    )
+    process_parser.add_argument(
+        "--use-ai",
+        action="store_true",
+        help="Use AI to create field mappings (requires OPENROUTER_API_KEY in .env file)",
+    )
+    process_parser.add_argument(
+        "--target-fields",
+        nargs="+",
+        help=f"Custom target fields to map to (default: {', '.join(DEFAULT_TARGET_FIELDS)})",
+    )
+    process_parser.add_argument(
+        "--data-description",
+        help="Description of the data you are looking for (helps AI determine file relevance)",
     )
     
     return parser.parse_args()
@@ -193,7 +228,7 @@ def find_data_files(paths: List[str], file_types: List[str], max_files: int = No
     return data_files
 
 
-def process_files(file_paths: List[str]) -> Tuple[Dict[str, Dict[str, Any]], List[Dict[str, Any]], Dict[str, str]]:
+def process_files(file_paths: List[str]) -> Tuple[Dict[str, Dict[str, Any]], List[Dict[str, Any]], List[str]]:
     """
     Process all files and extract headers.
     
@@ -201,373 +236,431 @@ def process_files(file_paths: List[str]) -> Tuple[Dict[str, Dict[str, Any]], Lis
         file_paths: List of file paths to process
         
     Returns:
-        Tuple of (header_stats, file_metadata, failed_files)
-            header_stats: Dict mapping headers to their statistics
-            file_metadata: List of dicts with metadata about processed files
-            failed_files: Dict mapping failed files to error messages
+        Tuple of (header_stats, file_metadata, all_headers)
     """
     header_stats = {}
     file_metadata = []
+    all_headers = []
     failed_files = {}
     
-    # Add progress bar
     for file_path in tqdm(file_paths, desc="Processing files", unit="file"):
         try:
+            # Extract headers from file
             headers, headers_inferred = extract_headers_from_file(file_path)
             
             # Update header statistics
             for header in headers:
                 if header not in header_stats:
-                    header_stats[header] = {'count': 0, 'files': []}
-                header_stats[header]['count'] += 1
-                header_stats[header]['files'].append(os.path.basename(file_path))
+                    header_stats[header] = {
+                        "count": 0,
+                        "files": []
+                    }
+                header_stats[header]["count"] += 1
+                header_stats[header]["files"].append(os.path.basename(file_path))
             
+            # Add to file metadata
             file_metadata.append({
-                'path': file_path,
-                'headers': headers,
-                'headers_inferred': headers_inferred
+                "path": file_path,
+                "headers": headers,
+                "headers_inferred": headers_inferred
             })
+            
+            # Add to all headers list
+            all_headers.extend(headers)
             
         except Exception as e:
             failed_files[file_path] = str(e)
+            print(f"Error processing {file_path}: {str(e)}", file=sys.stderr)
     
-    return header_stats, file_metadata, failed_files
+    # Remove duplicates from all_headers
+    all_headers = list(set(all_headers))
+    
+    return header_stats, file_metadata, all_headers
 
 
 def main():
     """Main entry point for the CLI."""
     args = parse_args()
     
-    # Process based on command
-    if args.command == "analyze":
-        # Find all data files in the specified paths
-        data_files = find_data_files(args.paths, args.file_types, args.max_files)
-        print(f"Found {len(data_files)} data files to process")
+    if not args.command:
+        print("Error: No command specified. Use 'analyze', 'extract', or 'process'.", file=sys.stderr)
+        sys.exit(1)
     
-        # Process all files and extract headers
-        # Process all files and extract headers
-        header_stats, file_metadata, failed_files = process_files(data_files)
+    # Handle the analyze command
+    if args.command == "analyze":
+        # Find data files
+        data_files = find_data_files(args.paths, args.file_types, args.max_files)
+        if not data_files:
+            print("Error: No matching data files found.", file=sys.stderr)
+            sys.exit(1)
+        
+        print(f"Found {len(data_files)} data files to analyze.")
+        
+        # Process files to extract headers
+        header_stats, file_metadata, all_headers = process_files(data_files)
+        
+        # Group fields by type
+        field_groups = group_fields(all_headers)
         
         # Create field mappings
-        field_mapper = create_field_mappings(file_metadata)
+        if args.use_ai:
+            # Use AI-based field mapping with custom target fields
+            target_fields = args.target_fields or DEFAULT_TARGET_FIELDS
+            data_description = args.data_description or ""
+            print(f"Using AI to create field mappings with target fields: {', '.join(target_fields)}")
+            if data_description:
+                print(f"Using data description: \"{data_description}\"")
+            mapper = create_ai_field_mappings(file_metadata, target_fields, data_description)
+            mappings_report = format_ai_mappings_report(mapper)
+        else:
+            # Use traditional regex-based field mapping
+            target_fields = args.target_fields or DEFAULT_TARGET_FIELDS
+            print(f"Creating field mappings with target fields: {', '.join(target_fields)}")
+            mapper = create_field_mappings(file_metadata, target_fields)
+            mappings_report = format_mappings_report(mapper)
         
         # Save mappings to file
-        field_mapper.save_mappings(args.mappings_output)
-        print(f"\nWrote field mappings to {args.mappings_output}")
+        mapper.save_mappings(args.mappings_output)
+        print(f"Field mappings saved to {args.mappings_output}")
         
-        # Apply field normalization (enabled by default)
-        all_headers = list(header_stats.keys())
+        # Generate analysis report
+        report_lines = [
+            "Field Normalizer Analysis Report",
+            "=" * 80,
+            "",
+            f"Total files analyzed: {len(data_files)}",
+            f"Total unique headers found: {len(all_headers)}",
+            ""
+        ]
+        
+        # Add field groups to report
         if not args.no_normalize:
-            if not args.no_variations:
-                field_variations = analyze_field_variations(all_headers, header_stats)
-                normalized_output = format_field_variations(field_variations, header_stats)
-            else:
-                field_groups = group_fields(all_headers)
-                normalized_output = format_field_groups(field_groups, header_stats)
+            report_lines.append(format_field_groups(field_groups, header_stats))
         
-        # Output analysis results
+        # Add field variations to report
+        if not args.no_variations and not args.no_normalize:
+            field_variations = analyze_field_variations(all_headers, header_stats)
+            report_lines.append(format_field_variations(field_variations, header_stats))
+        
+        # Add mappings report
+        report_lines.append("")
+        report_lines.append(mappings_report)
+        
+        # Add AI analysis section if AI was used
+        if args.use_ai:
+            report_lines.append("")
+            report_lines.append("AI Analysis Details")
+            report_lines.append("=" * 80)
+            report_lines.append("")
+            
+            for file_name, api_data in mapper.api_responses.items():
+                report_lines.append(f"File: {file_name}")
+                report_lines.append("-" * (len(file_name) + 6))
+                report_lines.append("")
+                
+                # Add headers
+                report_lines.append("Headers:")
+                report_lines.append("```")
+                report_lines.append(", ".join(api_data["headers"]))
+                report_lines.append("```")
+                report_lines.append("")
+                
+                # Add sample data in native format
+                report_lines.append(f"Sample Data ({api_data.get('sample_format', 'unknown').upper()}):")
+                report_lines.append("```")
+                if "sample_display" in api_data:
+                    report_lines.append(api_data["sample_display"])
+                else:
+                    report_lines.append(json.dumps(api_data["sample_data"], indent=2))
+                report_lines.append("```")
+                report_lines.append("")
+                
+                # Add prompt
+                report_lines.append("AI Prompt:")
+                report_lines.append("```")
+                report_lines.append(api_data["prompt"])
+                report_lines.append("```")
+                report_lines.append("")
+                
+                # Add response
+                report_lines.append("AI Response:")
+                report_lines.append("```")
+                report_lines.append(api_data["response"])
+                report_lines.append("```")
+                report_lines.append("")
+                
+                # Add final mappings if available
+                if file_name in [os.path.basename(path) for path in mapper.file_mappings]:
+                    file_path = next(path for path in mapper.file_mappings if os.path.basename(path) == file_name)
+                    file_mappings = mapper.file_mappings[file_path]
+                    
+                    report_lines.append("Final Mappings:")
+                    report_lines.append("```json")
+                    report_lines.append(json.dumps(file_mappings, indent=2))
+                    report_lines.append("```")
+                    report_lines.append("")
+                
+                report_lines.append("-" * 80)
+                report_lines.append("")
+        
+        # Output the report
+        report = "\n".join(report_lines)
         if args.output:
             with open(args.output, 'w', encoding='utf-8') as f:
-                # Add header with processing summary
-                summary = [
-                    f"Field Normalization Report",
-                    "=" * 80,
-                    f"Total files processed: {len(file_metadata)}",
-                    f"Files with inferred headers: {sum(1 for m in file_metadata if m['headers_inferred'])}",
-                    f"Files with standard headers: {sum(1 for m in file_metadata if not m['headers_inferred'])}",
-                    ""
-                ]
-                
-                if not args.no_normalize:
-                    if not args.no_variations:
-                        content = format_field_variations(field_variations, header_stats)
-                    else:
-                        content = format_field_groups(field_groups, header_stats)
-                else:
-                    content = format_header_stats(header_stats)
-                
-                # Add files with inferred headers section
-                inferred_files = [m['path'] for m in file_metadata if m['headers_inferred']]
-                if inferred_files:
-                    summary.append("\nFILES WITH INFERRED HEADERS:")
-                    summary.append("=" * 80)
-                    for file_path in sorted(inferred_files):
-                        summary.append(f"- {os.path.basename(file_path)}")
-                    summary.append("")
-                
-                summary.append(content)
-                f.write("\n".join(summary))
-            print(f"\nWrote analysis report to {args.output}")
+                f.write(report)
+            print(f"Analysis report saved to {args.output}")
         else:
-            if not args.no_normalize:
-                print("\nNormalized Field Groups:")
-                print(normalized_output)
-            else:
-                print("\nExtracted Headers:")
-                print("\nHeader | Occurrences | Files")
-                print("-" * 80)
-                for header in sorted(header_stats.keys()):
-                    stats = header_stats[header]
-                    # Truncate the files list if it's too long for display
-                    files_str = ", ".join(stats['files'])
-                    if len(files_str) > 50:
-                        files_str = files_str[:47] + "..."
-                    print(f"{header} | {stats['count']} | {files_str}")
+            print(report)
+    
+    # Handle the extract command
     elif args.command == "extract":
         # Load field mappings
-        if os.path.isfile(args.mappings):
-            field_mapper = create_field_mappings([])  # Create empty mapper
-            field_mapper.load_mappings(args.mappings)
-            print(f"Loaded field mappings from {args.mappings}")
+        if args.use_ai:
+            mapper = AIFieldMapper([])  # Initialize with empty target fields
+            mapper.load_mappings(args.mappings)
         else:
-            print(f"Error: Mappings file {args.mappings} not found", file=sys.stderr)
+            mapper = FieldMapper()
+            mapper.load_mappings(args.mappings)
+        
+        # Get file paths from mappings
+        file_paths = mapper.get_all_file_paths()
+        if not file_paths:
+            print("Error: No file paths found in mappings.", file=sys.stderr)
             sys.exit(1)
         
-        # Extract file paths from the mappings
-        data_files = field_mapper.get_all_file_paths()
-        if not data_files:
-            print("Error: No file paths found in mappings file", file=sys.stderr)
-            sys.exit(1)
-        print(f"Using {len(data_files)} file paths from mappings file")
+        print(f"Extracting data from {len(file_paths)} files using mappings in {args.mappings}")
         
-        # Extract data using the field mappings
-        print(f"Extracting data from {len(data_files)} files...")
-        records = extract_all_data(data_files, field_mapper)
+        # Extract data
+        record_count = write_jsonl(
+            extract_all_data(file_paths, mapper),
+            args.output,
+            args.batch_size,
+            args.group_by_email
+        )
         
-        # Write to JSONL file
-        print(f"Writing records to {args.output}...")
-        total_records = write_jsonl(records, args.output, args.batch_size, args.group_by_email)
-        print(f"Extracted {total_records} records to {args.output}")
+        print(f"Extracted {record_count} records to {args.output}")
     
+    # Handle the process command (analyze + extract)
     elif args.command == "process":
-        # Find all data files in the specified paths
+        # Find data files
         data_files = find_data_files(args.paths, args.file_types, args.max_files)
-        print(f"Found {len(data_files)} data files to process")
+        if not data_files:
+            print("Error: No matching data files found.", file=sys.stderr)
+            sys.exit(1)
         
-        # Step 1: Analyze files and create mappings
-        print("\n=== Step 1: Analyzing files and creating mappings ===")
-        header_stats, file_metadata, failed_files = process_files(data_files)
+        print(f"Found {len(data_files)} data files to process.")
+        
+        # Process files to extract headers
+        header_stats, file_metadata, all_headers = process_files(data_files)
         
         # Create field mappings
-        field_mapper = create_field_mappings(file_metadata)
+        if args.use_ai:
+            # Use AI-based field mapping with custom target fields
+            target_fields = args.target_fields or DEFAULT_TARGET_FIELDS
+            data_description = args.data_description or ""
+            print(f"Using AI to create field mappings with target fields: {', '.join(target_fields)}")
+            if data_description:
+                print(f"Using data description: \"{data_description}\"")
+            mapper = create_ai_field_mappings(file_metadata, target_fields, data_description)
+            mappings_report = format_ai_mappings_report(mapper)
+        else:
+            # Use traditional regex-based field mapping
+            target_fields = args.target_fields or DEFAULT_TARGET_FIELDS
+            print(f"Creating field mappings with target fields: {', '.join(target_fields)}")
+            mapper = create_field_mappings(file_metadata, target_fields)
+            mappings_report = format_mappings_report(mapper)
         
         # Save mappings to file
-        field_mapper.save_mappings(args.mappings_output)
-        print(f"Saved field mappings to {args.mappings_output}")
+        mapper.save_mappings(args.mappings_output)
+        print(f"Field mappings saved to {args.mappings_output}")
         
-        # Print analysis report if requested
+        # Generate analysis report if requested
         if args.analysis_output:
-            # Generate report
-            if not args.no_normalize:
-                # Analyze field variations
-                field_variations = analyze_field_variations(header_stats)
-                
-                # Group fields by type
-                field_groups = group_fields(field_variations)
-                
-                # Format output
-                if args.no_variations:
-                    output = format_field_groups(field_groups, header_stats)
-                else:
-                    output = format_field_variations(field_variations, header_stats)
-            else:
-                # Just show raw headers without normalization
-                output = "\nRaw Headers (no normalization):\n\n"
-                output += "Header | Count | Files\n"
-                output += "-" * 50 + "\n"
-                
-                # Sort headers by count
-                sorted_headers = sorted(header_stats.items(), key=lambda x: x[1]['count'], reverse=True)
-                for header, stats in sorted_headers:
-                    # Truncate the files list if it's too long for display
-                    files_str = ", ".join(stats['files'])
-                    if len(files_str) > 50:
-                        files_str = files_str[:47] + "..."
-                    output += f"{header} | {stats['count']} | {files_str}\n"
+            report_lines = [
+                "Field Normalizer Analysis Report",
+                "=" * 80,
+                "",
+                f"Total files analyzed: {len(data_files)}",
+                f"Total unique headers found: {len(all_headers)}",
+                ""
+            ]
             
-            # Write to file
+            # Add field groups to report
+            if not args.no_normalize:
+                field_groups = group_fields(all_headers)
+                report_lines.append(format_field_groups(field_groups, header_stats))
+            
+            # Add field variations to report
+            if not args.no_variations and not args.no_normalize:
+                field_variations = analyze_field_variations(all_headers, header_stats)
+                report_lines.append(format_field_variations(field_variations, header_stats))
+            
+            # Add mappings report
+            report_lines.append("")
+            report_lines.append(mappings_report)
+            
+            # Add AI analysis section if AI was used
+            if args.use_ai:
+                report_lines.append("")
+                report_lines.append("AI Analysis Details")
+                report_lines.append("=" * 80)
+                report_lines.append("")
+                
+                for file_name, api_data in mapper.api_responses.items():
+                    report_lines.append(f"File: {file_name}")
+                    report_lines.append("-" * (len(file_name) + 6))
+                    report_lines.append("")
+                    
+                    # Add headers
+                    report_lines.append("Headers:")
+                    report_lines.append("```")
+                    report_lines.append(", ".join(api_data["headers"]))
+                    report_lines.append("```")
+                    report_lines.append("")
+                    
+                    # Add sample data in native format
+                    report_lines.append(f"Sample Data ({api_data.get('sample_format', 'unknown').upper()}):")
+                    report_lines.append("```")
+                    if "sample_display" in api_data:
+                        report_lines.append(api_data["sample_display"])
+                    else:
+                        report_lines.append(json.dumps(api_data["sample_data"], indent=2))
+                    report_lines.append("```")
+                    report_lines.append("")
+                    
+                    # Add prompt
+                    report_lines.append("AI Prompt:")
+                    report_lines.append("```")
+                    report_lines.append(api_data["prompt"])
+                    report_lines.append("```")
+                    report_lines.append("")
+                    
+                    # Add response
+                    report_lines.append("AI Response:")
+                    report_lines.append("```")
+                    report_lines.append(api_data["response"])
+                    report_lines.append("```")
+                    report_lines.append("")
+                    
+                    # Add final mappings if available
+                    if file_name in [os.path.basename(path) for path in mapper.file_mappings]:
+                        file_path = next(path for path in mapper.file_mappings if os.path.basename(path) == file_name)
+                        file_mappings = mapper.file_mappings[file_path]
+                        
+                        report_lines.append("Final Mappings:")
+                        report_lines.append("```json")
+                        report_lines.append(json.dumps(file_mappings, indent=2))
+                        report_lines.append("```")
+                        report_lines.append("")
+                    
+                    report_lines.append("-" * 80)
+                    report_lines.append("")
+            
+            # Output the report
+            report = "\n".join(report_lines)
             with open(args.analysis_output, 'w', encoding='utf-8') as f:
-                f.write(output)
-            print(f"Saved analysis report to {args.analysis_output}")
+                f.write(report)
+            print(f"Analysis report saved to {args.analysis_output}")
         
-        # Step 2: Extract data using the mappings
-        print("\n=== Step 2: Extracting data using mappings ===")
-        
-        # Extract data using the field mappings
+        # Extract data
         print(f"Extracting data from {len(data_files)} files...")
-        records = extract_all_data(data_files, field_mapper)
+        record_count = write_jsonl(
+            extract_all_data(data_files, mapper),
+            args.extract_output,
+            args.batch_size,
+            args.group_by_email
+        )
         
-        # Write to JSONL file
-        print(f"Writing records to {args.extract_output}...")
-        total_records = write_jsonl(records, args.extract_output, args.batch_size, args.group_by_email)
-        print(f"Extracted {total_records} records to {args.extract_output}")
-        
-        # Print processing statistics
-        print(f"\nProcessing Statistics:")
-        print(f"Total files: {len(data_files)}")
-        print(f"Successfully processed: {len(file_metadata)}")
-        print(f"Files with inferred headers: {sum(1 for m in file_metadata if m['headers_inferred'])}")
-        print(f"Failed: {len(failed_files)}")
-        print(f"Records extracted: {total_records}")
-        
-        # Print details about failed files if any
-        if failed_files:
-            print("\nFiles with errors:")
-            for file_path, error_msg in failed_files.items():
-                print(f"  - {os.path.basename(file_path)}: {error_msg}")
-    
-    else:
-        # No command specified, show help
-        print("Error: No command specified. Use 'analyze', 'extract', or 'process'.")
-        sys.exit(1)
-    # This section is now handled within the command-specific blocks
-    
-    # Print processing statistics
-    if args.command == "analyze":
-        print(f"\nProcessing Statistics:")
-        print(f"Total files: {len(data_files)}")
-        print(f"Successfully processed: {len(file_metadata)}")
-        print(f"Files with inferred headers: {sum(1 for m in file_metadata if m['headers_inferred'])}")
-        print(f"Failed: {len(failed_files)}")
-    elif args.command == "extract" and 'total_records' in locals():
-        print(f"\nProcessing Statistics:")
-        print(f"Total files: {len(data_files)}")
-        print(f"Records extracted: {total_records}")
-    
-    # Print details about failed files if any (only in analyze mode)
-    if args.command == "analyze" and failed_files:
-        print("\nFiles with errors:")
-        for file_path, error_msg in failed_files.items():
-            print(f"  - {os.path.basename(file_path)}: {error_msg}")
-    
-    if args.command == "analyze":
-        print(f"\nTotal unique headers found: {len(header_stats)}")
-        
-        # Print the most common headers (only if not showing normalized output)
-        if args.no_normalize:
-            print("\nMost common headers:")
-            sorted_headers = sorted(header_stats.items(), key=lambda x: x[1]['count'], reverse=True)
-            for header, stats in sorted_headers[:10]:  # Show top 10
-                print(f"{header}: {stats['count']} occurrences")
+        print(f"Extracted {record_count} records to {args.extract_output}")
 
 
 def format_field_groups(field_groups: Dict[str, Set[str]], header_stats: Dict[str, Dict[str, Any]] = None) -> str:
-    """Format field groups for display with file sources.
+    """
+    Format field groups for display.
     
     Args:
         field_groups: Dictionary mapping field types to sets of field names
-        header_stats: Dictionary mapping headers to their statistics (count and files)
+        header_stats: Optional dictionary containing header statistics
         
     Returns:
-        Formatted string representation of field groups with sources and unmatched headers
+        Formatted string representation of field groups
     """
-    output = []
-    matched_headers = set()
+    lines = [
+        "Field Groups by Type",
+        "=" * 80,
+        ""
+    ]
     
-    # Process all field groups first
-    for field_type, fields in field_groups.items():
-        if fields:  # Only show non-empty groups
-            output.append(f"\n{field_type.upper()} FIELDS:")
-            output.append("=" * 80)
-            for field in sorted(fields):
-                matched_headers.add(field)
-                output.append(f"  - {field}")
-    
-    # Add file headers section if we have file metadata
-    if header_stats and any('files' in data for data in header_stats.values()):
-        # Group headers by file
-        file_headers = {}
-        for header, data in header_stats.items():
-            for filename in data.get('files', []):
-                if filename not in file_headers:
-                    file_headers[filename] = set()
-                file_headers[filename].add(header)
+    for field_type, fields in sorted(field_groups.items()):
+        if not fields:
+            continue
+            
+        lines.append(f"{field_type.upper()} FIELDS:")
+        lines.append("-" * 40)
         
-        if file_headers:
-            output.append("\n\nFILE HEADERS:")
-            output.append("=" * 80)
-            for filename, headers in sorted(file_headers.items()):
-                output.append(f"\n{filename}:")
-                output.append("  " + ", ".join(sorted(headers)))
-    
-    # Add unmatched headers section
-    if header_stats:
-        all_headers = set(header_stats.keys())
-        unmatched_headers = all_headers - matched_headers
+        # Sort fields by frequency if header_stats is provided
+        if header_stats:
+            sorted_fields = sorted(fields, key=lambda x: header_stats.get(x, {}).get('count', 0), reverse=True)
+        else:
+            sorted_fields = sorted(fields)
         
-        if unmatched_headers:
-            output.append("\n\nUNMATCHED HEADERS:")
-            output.append("=" * 80)
-            for header in sorted(unmatched_headers):
-                files = header_stats[header].get('files', [])
-                output.append(f"\n{header}")
-                if files:
-                    output.append(f"  Found in: {', '.join(files[:3])}" + ("..." if len(files) > 3 else ""))
+        for field in sorted_fields:
+            if header_stats and field in header_stats:
+                count = header_stats[field]['count']
+                files = header_stats[field]['files']
+                files_str = ", ".join(files[:3])
+                if len(files) > 3:
+                    files_str += f" and {len(files) - 3} more"
+                lines.append(f"  {field} ({count} occurrences in {len(files)} files: {files_str})")
+            else:
+                lines.append(f"  {field}")
+        
+        lines.append("")
     
-    return "\n".join(output)
+    return "\n".join(lines)
 
 
 def format_field_variations(field_variations: Dict[str, Dict[str, Dict[str, List[str]]]], header_stats: Dict[str, Dict[str, Any]] = None) -> str:
-    """Format field variations for display with file sources.
+    """
+    Format field variations for display.
     
     Args:
-        field_variations: Dictionary of field variations by type with sources
-        header_stats: Dictionary mapping headers to their statistics (count and files)
+        field_variations: Dictionary mapping field types to dictionaries of patterns and matching fields
+        header_stats: Optional dictionary containing header statistics
         
     Returns:
-        Formatted string representation of field variations with sources and unmatched headers
+        Formatted string representation of field variations
     """
-    output = []
-    matched_headers = set()
+    lines = [
+        "Field Variations by Type",
+        "=" * 80,
+        ""
+    ]
     
-    # First, collect all fields by type
-    fields_by_type = {}
-    for field_type, patterns in field_variations.items():
-        fields_by_type[field_type] = set()
-        for fields in patterns.values():
-            fields_by_type[field_type].update(fields.keys())
-    
-    # Show fields grouped by type
-    for field_type, fields in fields_by_type.items():
-        if fields:  # Only show non-empty groups
-            output.append(f"\n{field_type.upper()} FIELDS:")
-            output.append("=" * 80)
-            for field in sorted(fields):
-                matched_headers.add(field)
-                output.append(f"  - {field}")
-    
-    # Add file headers section if we have file metadata
-    if header_stats and any('files' in data for data in header_stats.values()):
-        # Group headers by file
-        file_headers = {}
-        for header, data in header_stats.items():
-            for filename in data.get('files', []):
-                if filename not in file_headers:
-                    file_headers[filename] = set()
-                file_headers[filename].add(header)
+    for field_type, patterns in sorted(field_variations.items()):
+        lines.append(f"{field_type.upper()} FIELDS:")
+        lines.append("-" * 40)
         
-        if file_headers:
-            output.append("\n\nFILE HEADERS:")
-            output.append("=" * 80)
-            for filename, headers in sorted(file_headers.items()):
-                output.append(f"\n{filename}:")
-                output.append("  " + ", ".join(sorted(headers)))
-    
-    # Add unmatched headers section
-    if header_stats:
-        all_headers = set(header_stats.keys())
-        unmatched_headers = all_headers - matched_headers
+        for pattern, fields in sorted(patterns.items()):
+            if isinstance(fields, dict):
+                # New format with file sources
+                field_list = list(fields.keys())
+                lines.append(f"  Pattern: {pattern}")
+                for field in sorted(field_list):
+                    files = fields[field]
+                    files_str = ", ".join(files[:3])
+                    if len(files) > 3:
+                        files_str += f" and {len(files) - 3} more"
+                    lines.append(f"    - {field} (in {len(files)} files: {files_str})")
+            else:
+                # Old format without file sources
+                lines.append(f"  Pattern: {pattern}")
+                for field in sorted(fields):
+                    lines.append(f"    - {field}")
         
-        if unmatched_headers:
-            output.append("\n\nUNMATCHED HEADERS:")
-            output.append("=" * 80)
-            for header in sorted(unmatched_headers):
-                files = header_stats[header].get('files', [])
-                output.append(f"\n{header}")
-                if files:
-                    output.append(f"  Found in: {', '.join(files[:3])}" + ("..." if len(files) > 3 else ""))
+        lines.append("")
     
-    return "\n".join(output)
+    return "\n".join(lines)
 
 
 if __name__ == "__main__":
