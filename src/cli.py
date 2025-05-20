@@ -93,6 +93,11 @@ def parse_args():
         default=1000,
         help="Batch size for writing records to output file",
     )
+    extract_parser.add_argument(
+        "--group-by-email",
+        action="store_true",
+        help="Group records by email address (disabled by default)",
+    )
     
     # 3. Process command - combines analyze and extract in one step
     process_parser = subparsers.add_parser(
@@ -131,6 +136,11 @@ def parse_args():
         "--no-variations",
         action="store_true",
         help="Don't show field variations in the output (shown by default)",
+    )
+    process_parser.add_argument(
+        "--group-by-email",
+        action="store_true",
+        help="Group records by email address (disabled by default)",
     )
     
     return parser.parse_args()
@@ -326,7 +336,7 @@ def main():
         
         # Write to JSONL file
         print(f"Writing records to {args.output}...")
-        total_records = write_jsonl(records, args.output, args.batch_size)
+        total_records = write_jsonl(records, args.output, args.batch_size, args.group_by_email)
         print(f"Extracted {total_records} records to {args.output}")
     
     elif args.command == "process":
@@ -389,7 +399,7 @@ def main():
         
         # Write to JSONL file
         print(f"Writing records to {args.extract_output}...")
-        total_records = write_jsonl(records, args.extract_output, args.batch_size)
+        total_records = write_jsonl(records, args.extract_output, args.batch_size, args.group_by_email)
         print(f"Extracted {total_records} records to {args.extract_output}")
         
         # Print processing statistics

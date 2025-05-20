@@ -9,6 +9,7 @@ import sys
 from typing import Dict, List, Set, Any, Iterator, Optional, Tuple
 from tqdm import tqdm
 from src.field_mapper import FieldMapper
+from src.field_normalizer import validate_field_value
 
 def extract_data_from_file(file_path: str, field_mapping: Dict[str, List[str]]) -> Iterator[Dict[str, Any]]:
     """
@@ -29,8 +30,7 @@ def extract_data_from_file(file_path: str, field_mapping: Dict[str, List[str]]) 
     elif ext == 'json':
         yield from extract_data_from_json(file_path, field_mapping)
     elif ext == 'sql':
-        # Not implemented yet
-        print(f"Warning: SQL data extraction not implemented yet, skipping {file_path}", file=sys.stderr)
+        yield from extract_data_from_sql(file_path, field_mapping)
     else:
         print(f"Warning: Unsupported file type: {ext}, skipping {file_path}", file=sys.stderr)
 
@@ -95,20 +95,25 @@ def extract_data_from_csv(file_path: str, field_mapping: Dict[str, List[str]]) -
                         if not value or value.upper() in ('NULL', 'N/A', 'NONE', ''):
                             continue
                         
+                        # Validate field value based on field type
+                        validated_value = validate_field_value(field_type, value)
+                        if validated_value is None:
+                            continue
+                        
                         # Handle multiple fields mapping to the same normalized field
                         if field_type in record:
                             # If we already have a value for this field type
                             if isinstance(record[field_type], list):
                                 # If it's already a list, append the new value if not already present
-                                if value not in record[field_type]:
-                                    record[field_type].append(value)
+                                if validated_value not in record[field_type]:
+                                    record[field_type].append(validated_value)
                             else:
                                 # Only convert to list if the values are different
-                                if value != record[field_type]:
-                                    record[field_type] = [record[field_type], value]
+                                if validated_value != record[field_type]:
+                                    record[field_type] = [record[field_type], validated_value]
                         else:
                             # First occurrence of this field type
-                            record[field_type] = value
+                            record[field_type] = validated_value
                 
                 # Only yield records that have at least one of our target fields
                 if record:
@@ -147,6 +152,117 @@ def extract_data_from_json(file_path: str, field_mapping: Dict[str, List[str]]) 
     except Exception as e:
         print(f"Error extracting data from JSON file {file_path}: {str(e)}", file=sys.stderr)
 
+def extract_data_from_sql(file_path: str, field_mapping: Dict[str, List[str]]) -> Iterator[Dict[str, Any]]:
+    """
+    Extract data from a SQL file based on field mappings.
+    
+    Args:
+        file_path: Path to the SQL file
+        field_mapping: Mapping of normalized field types to lists of original headers
+        
+    Yields:
+        Dictionaries containing extracted data with normalized field names
+    """
+    try:
+        with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+            content = f.read()
+            
+            # Find all INSERT statements
+            import re
+            insert_pattern = r"INSERT\s+INTO\s+`?(\w+)`?\s*\(([^)]+)\)\s*VALUES\s*(.+?);"
+            matches = re.finditer(insert_pattern, content, re.IGNORECASE | re.MULTILINE)
+            
+            for match in tqdm(matches, desc="Processing SQL INSERT statements", unit="statement"):
+                table_name = match.group(1)
+                columns_str = match.group(2)
+                values_str = match.group(3)
+                
+                # Parse column names
+                columns = [col.strip().strip('`') for col in columns_str.split(',')]
+                
+                # Create a mapping from column index to normalized field
+                column_mapping = {}
+                for field_type, original_headers in field_mapping.items():
+                    for header in original_headers:
+                        if header in columns:
+                            column_idx = columns.index(header)
+                            column_mapping[column_idx] = (field_type, header)
+                
+                # Parse values - handle both single and multi-row inserts
+                # First, split into individual value sets
+                value_sets = []
+                current_set = []
+                in_quotes = False
+                current_value = ""
+                
+                for char in values_str:
+                    if char == "'" and (len(current_value) == 0 or current_value[-1] != '\\'):
+                        in_quotes = not in_quotes
+                        current_value += char
+                    elif char == ',' and not in_quotes:
+                        current_set.append(current_value.strip())
+                        current_value = ""
+                    elif char == '(' and not in_quotes and not current_value:
+                        # Start of new value set
+                        if current_set:
+                            value_sets.append(current_set)
+                            current_set = []
+                    elif char == ')' and not in_quotes:
+                        # End of value set
+                        if current_value.strip():
+                            current_set.append(current_value.strip())
+                        if current_set:
+                            value_sets.append(current_set)
+                            current_set = []
+                        current_value = ""
+                    else:
+                        current_value += char
+                
+                # Process each set of values
+                for value_set in value_sets:
+                    if len(value_set) != len(columns):
+                        continue  # Skip malformed rows
+                    
+                    record = {}
+                    
+                    # Extract data based on mappings
+                    for col_idx, (field_type, original_header) in column_mapping.items():
+                        if col_idx < len(value_set):
+                            value = value_set[col_idx].strip()
+                            
+                            # Remove surrounding quotes if present
+                            if value.startswith("'") and value.endswith("'"):
+                                value = value[1:-1]
+                            
+                            # Skip NULL values
+                            if not value or value.upper() in ('NULL', 'N/A', 'NONE', ''):
+                                continue
+                            
+                            # Validate field value based on field type
+                            validated_value = validate_field_value(field_type, value)
+                            if validated_value is None:
+                                continue
+                            
+                            # Handle multiple fields mapping to the same normalized field
+                            if field_type in record:
+                                if isinstance(record[field_type], list):
+                                    if validated_value not in record[field_type]:
+                                        record[field_type].append(validated_value)
+                                else:
+                                    if validated_value != record[field_type]:
+                                        record[field_type] = [record[field_type], validated_value]
+                            else:
+                                record[field_type] = validated_value
+                    
+                    # Only yield records that have at least one of our target fields
+                    if record:
+                        # Add source file information
+                        record['_source_file'] = os.path.basename(file_path)
+                        yield record
+                        
+    except Exception as e:
+        print(f"Error extracting data from SQL file {file_path}: {str(e)}", file=sys.stderr)
+
 def _process_json_object(obj: Dict[str, Any], field_mapping: Dict[str, List[str]], file_path: str) -> Iterator[Dict[str, Any]]:
     """
     Process a JSON object and extract fields based on mappings.
@@ -175,20 +291,25 @@ def _process_json_object(obj: Dict[str, Any], field_mapping: Dict[str, List[str]
                 if not value or value.upper() in ('NULL', 'N/A', 'NONE', ''):
                     continue
                 
+                # Validate field value based on field type
+                validated_value = validate_field_value(field_type, value)
+                if validated_value is None:
+                    continue
+                
                 # Handle multiple fields mapping to the same normalized field
                 if field_type in record:
                     # If we already have a value for this field type
                     if isinstance(record[field_type], list):
                         # If it's already a list, append the new value if not already present
-                        if value not in record[field_type]:
-                            record[field_type].append(value)
+                        if validated_value not in record[field_type]:
+                            record[field_type].append(validated_value)
                     else:
                         # Only convert to list if the values are different
-                        if value != record[field_type]:
-                            record[field_type] = [record[field_type], value]
+                        if validated_value != record[field_type]:
+                            record[field_type] = [record[field_type], validated_value]
                 else:
                     # First occurrence of this field type
-                    record[field_type] = value
+                    record[field_type] = validated_value
     
     # Only yield records that have at least one of our target fields
     if record:
@@ -327,7 +448,7 @@ def deduplicate_records(records: Iterator[Dict[str, Any]]) -> Iterator[Dict[str,
             seen_records.add(record_hash)
             yield record
 
-def write_jsonl(records: Iterator[Dict[str, Any]], output_path: str, batch_size: int = 1000) -> int:
+def write_jsonl(records: Iterator[Dict[str, Any]], output_path: str, batch_size: int = 1000, group_by_email: bool = False) -> int:
     """
     Write records to a JSONL file in batches.
     
@@ -339,13 +460,17 @@ def write_jsonl(records: Iterator[Dict[str, Any]], output_path: str, batch_size:
     Returns:
         Total number of records written
     """
-    # First merge records by email
-    print("Merging records by email...")
-    merged_records = list(merge_records_by_email(records))
+    # Convert records to a list for processing
+    records_list = list(records)
+    
+    # Optionally merge records by email
+    if group_by_email:
+        print("Merging records by email...")
+        records_list = list(merge_records_by_email(records_list))
     
     # Then deduplicate any remaining duplicates
-    print(f"Deduplicating {len(merged_records)} records...")
-    deduplicated_records = list(deduplicate_records(merged_records))
+    print(f"Deduplicating {len(records_list)} records...")
+    deduplicated_records = list(deduplicate_records(records_list))
     
     total_records = len(deduplicated_records)
     batch = []

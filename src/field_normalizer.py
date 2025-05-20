@@ -34,23 +34,24 @@ FIELD_PATTERNS = {
         r'telefono.?cellulare',
     ],
     'name': [
-        r'name',
-        r'nome',
+        r'^name$',
+        r'^nome$',
         r'first.?name',
+        r'firstname',
+        r'display.?name',
+        r'full.?name',
+        r'nombre',
+    ],
+    'lastname': [
         r'cognome',
         r'last.?name',
-        r'full.?name',
-        r'firstname',
         r'lastname',
-        r'user.?name',
-        r'username',
-        r'display.?name',
-        r'nome.?cognome',
-        r'nombre.?apellido',
-        # r'ragione.?sociale',
-        # r'company.?name',
-        # r'società',
-        # r'societa',
+        r'surname',
+        r'apellido',
+    ],
+    'username': [
+        r'^user.?name$',
+        r'^username$',
     ],
     'address': [
         # General address patterns
@@ -191,6 +192,8 @@ def group_fields(headers: List[str]) -> Dict[str, Set[str]]:
         'email': set(),
         'phone': set(),
         'name': set(),
+        'lastname': set(),
+        'username': set(),
         'address': set(),
         'other': set()
     }
@@ -200,6 +203,37 @@ def group_fields(headers: List[str]) -> Dict[str, Set[str]]:
         field_groups[field_type].add(header)
     
     return field_groups
+
+def validate_field_value(field_type: str, value: str) -> Any:
+    """
+    Validate and clean field values based on their type.
+    
+    Args:
+        field_type: Type of the field ('email', 'phone', 'name', etc.)
+        value: The value to validate
+        
+    Returns:
+        Validated value or None if the value should be discarded
+    """
+    if not value:
+        return None
+        
+    # Trim whitespace
+    value = value.strip()
+    
+    # Discard names with more than 50 characters
+    if field_type == 'name' and len(value) > 50:
+        return None
+        
+    # Discard phone numbers that contain alphabetic characters (words)
+    if field_type == 'phone':
+        # Check if the phone number contains alphabetic characters
+        # Allow common phone number characters: digits, +, -, (, ), spaces, dots
+        if re.search(r'[a-zA-Z]', value):
+            return None
+            
+    return value
+
 
 def analyze_field_variations(headers: List[str], header_stats: Dict[str, Dict[str, Any]] = None) -> Dict[str, Dict[str, Dict[str, List[str]]]]:
     """

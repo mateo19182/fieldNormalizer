@@ -28,8 +28,8 @@ def extract_headers_from_file(file_path: str) -> Tuple[Set[str], bool]:
         headers = extract_headers_from_json(file_path)
         return headers, False  # JSON files don't need header inference
     elif ext == 'sql':
-        raise ValueError(f"Unsupported file type: {ext}")
-        # return extract_headers_from_sql(file_path)
+        headers = extract_headers_from_sql(file_path)
+        return headers, False
     else:
         raise ValueError(f"Unsupported file type: {ext}")
 
@@ -156,7 +156,6 @@ def extract_headers_from_csv(file_path: str) -> Tuple[Set[str], bool]:
             except StopIteration:
                 # Empty file or no headers found
                 return set(), False
-
 
 def extract_headers_from_json(file_path: str) -> Set[str]:
     """
