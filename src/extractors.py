@@ -49,7 +49,7 @@ def extract_headers_from_file(file_path: str) -> Tuple[List[str], bool]:
     
     if ext == 'csv':
         return extract_headers_from_csv(file_path)
-    elif ext == 'json':
+    elif ext in ('json', 'jsonl'):
         headers = extract_headers_from_json(file_path)
         return headers, False  # JSON files don't need header inference
     elif ext == 'sql':
@@ -85,7 +85,16 @@ def has_valid_headers(headers: List[str]) -> bool:
     if not headers:
         return False
     
+    # Common header names that should be allowed even if they'd fail other checks
+    allowed_headers = {'email', 'id', 'email address', 'emailaddress', 'mail', 'e-mail'}
+    
     for header in headers:
+        header_lower = header.lower()
+        
+        # Skip if it's in our allowed list
+        if header_lower in allowed_headers:
+            continue
+            
         # Skip empty or whitespace-only headers or null / NULL
         if not header or not header.strip() or header.upper() in ('NULL', 'null'):
             return False
@@ -95,11 +104,12 @@ def has_valid_headers(headers: List[str]) -> bool:
         # Skip very long headers (likely data rows)
         if len(header) > 1000:
             return False
-        # Skip headers that have url or emails
-        if "@" in header or "http" in header or "www" in header:
+        # Skip headers that have urls - but not email which is a common header
+        if ("http" in header_lower or "www" in header_lower):
             return False
-        # Skip headers that look like phone number
-        if re.search(r'\d{2,}', header):
+        # Skip headers that look like phone numbers (standalone digits)
+        # Allow digits within variable names (like userId, field2, etc.)
+        if re.match(r'^\d+$', header.strip()):
             return False
     return True
 
@@ -142,8 +152,8 @@ def extract_headers_from_csv(file_path: str) -> Tuple[List[str], bool]:
         # If not JSON or JSON parsing failed, try processing as CSV
         f.seek(0)
         try:
-            # Try to detect dialect
-            sample = f.read(4096)
+            # Try to detect dialect with a larger sample
+            sample = f.read(8192)  # Increased sample size
             f.seek(0)
             
             # Skip empty lines before trying to detect dialect
@@ -154,20 +164,91 @@ def extract_headers_from_csv(file_path: str) -> Tuple[List[str], bool]:
                     continue
                 f.seek(pos)
                 break
+            
+            # Special handling for common formats
+            first_line = sample.split('\n')[0].strip()
+            
+            # Check for tab-separated values
+            if '\t' in first_line:
+                # Handle tab-delimited files (TSV)
+                headers = [h.strip() for h in first_line.split('\t') if h.strip()]
+                if has_valid_headers(headers):
+                    return headers, False
                 
-            dialect = csv.Sniffer().sniff(sample)
+                # If simple split didn't work, try with CSV module
+                f.seek(0)
+                dialect = csv.excel_tab
+                reader = csv.reader(f, dialect)
+                headers = next(reader)
+                headers = [h.strip() for h in headers if h.strip()]
+                if has_valid_headers(headers):
+                    return headers, False
+            
+            # Special handling for semicolon-delimited files with quoted fields
+            elif ';' in first_line:
+                # Handle semicolon-delimited files with quoted fields
+                if first_line.endswith(';'):  # Handle trailing semicolon
+                    first_line = first_line[:-1]
+                
+                # Check if fields are quoted
+                if '"' in first_line:
+                    # Use the csv module with proper dialect
+                    f.seek(0)
+                    dialect = csv.excel()
+                    dialect.delimiter = ';'
+                    dialect.quotechar = '"'
+                    dialect.doublequote = True
+                    
+                    reader = csv.reader(f, dialect)
+                    headers = next(reader)
+                    
+                    # Clean up headers
+                    headers = [h.strip().strip('"\'') for h in headers if h]
+                    
+                    if has_valid_headers(headers):
+                        return headers, False
+                else:
+                    # Simple split for non-quoted fields
+                    headers = [h.strip() for h in first_line.split(';') if h]
+                    if has_valid_headers(headers):
+                        return headers, False
+            
+            # Try with CSV Sniffer for other formats
+            try:
+                dialect = csv.Sniffer().sniff(sample)
+            except:
+                # If dialect detection fails, try common delimiters
+                for delimiter in [',', '\t', ';', '|']:
+                    if delimiter in first_line:
+                        if delimiter == '\t':
+                            dialect = csv.excel_tab
+                        else:
+                            dialect = csv.excel()
+                            dialect.delimiter = delimiter
+                        dialect.quotechar = '"'
+                        dialect.doublequote = True
+                        break
+                else:
+                    # If no delimiter found, default to comma
+                    dialect = csv.excel()
             
             # Read the first row as potential headers
+            f.seek(0)
             reader = csv.reader(f, dialect)
             try:
                 headers = next(reader)
                 
+                # Clean up headers - remove quotes and whitespace
+                headers = [h.strip().strip('"\'') for h in headers if h]
+                
                 # Check if these look like valid headers
                 if has_valid_headers(headers):
                     return headers, False  # Valid headers found, no inference needed
-                    
-                # If headers don't look valid, try to infer them
                 
+                # Debug output for header validation failures
+                print(f"Headers in {os.path.basename(file_path)} failed validation: {headers}", file=sys.stderr)
+                
+                # If headers don't look valid, try to infer them
                 # Get sample data for inference
                 f.seek(0)
                 sample_data, num_columns = sample_csv_data(file_path)
@@ -198,9 +279,14 @@ def extract_headers_from_csv(file_path: str) -> Tuple[List[str], bool]:
             print(f"Error processing {file_path}: {str(e)}", file=sys.stderr)
             # If all else fails, try with default dialect
             f.seek(0)
-            reader = csv.reader(f)
+            # Try tab-separated as a last resort if it's in the filename
+            if '\t' in first_line or 'tab' in file_path.lower():
+                reader = csv.reader(f, csv.excel_tab)
+            else:
+                reader = csv.reader(f)
             try:
                 headers = next(reader)
+                headers = [h.strip().strip('"\'') for h in headers if h]  # Clean up headers
                 return (headers, False) if has_valid_headers(headers) else ([], False)
             except StopIteration:
                 # Empty file or no headers found
@@ -208,33 +294,61 @@ def extract_headers_from_csv(file_path: str) -> Tuple[List[str], bool]:
 
 def extract_headers_from_json(file_path: str) -> List[str]:
     """
-    Extract headers (keys) from a JSON file.
+    Extract headers (keys) from a JSON file or JSONL (JSON Lines) file.
     
     Args:
-        file_path: Path to the JSON file
+        file_path: Path to the JSON/JSONL file
         
     Returns:
         List of all keys found in the JSON structure, preserving order
     """
-    with open(file_path, 'r', encoding='utf-8') as f:
-        data = json.load(f)
-    
     headers = []
     seen = set()
     
-    def extract_keys(obj, prefix=''):
-        if isinstance(obj, dict):
-            for key, value in obj.items():
-                if key not in seen:
-                    headers.append(key)
-                    seen.add(key)
-                if isinstance(value, (dict, list)):
-                    extract_keys(value, f"{prefix}{key}.")
-        elif isinstance(obj, list) and obj:
-            # Process the first item as a representative
-            extract_keys(obj[0], prefix)
-    
-    extract_keys(data)
+    # First try parsing as regular JSON
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            
+        def extract_keys(obj, prefix=''):
+            if isinstance(obj, dict):
+                for key, value in obj.items():
+                    if key not in seen:
+                        headers.append(key)
+                        seen.add(key)
+                    if isinstance(value, (dict, list)):
+                        extract_keys(value, f"{prefix}{key}.")
+            elif isinstance(obj, list) and obj:
+                # Process the first item as a representative
+                extract_keys(obj[0], prefix)
+        
+        extract_keys(data)
+        
+    except json.JSONDecodeError:
+        # If regular JSON parsing fails, try parsing as JSONL (JSON Lines)
+        # print(f"JSON parsing failed for {file_path}, trying JSONL format", file=sys.stderr)
+        with open(file_path, 'r', encoding='utf-8') as f:
+            # Process each line as a separate JSON object
+            for line_num, line in enumerate(f):
+                line = line.strip()
+                if not line:
+                    continue
+                    
+                try:
+                    obj = json.loads(line)
+                    if isinstance(obj, dict):
+                        for key in obj.keys():
+                            if key not in seen:
+                                headers.append(key)
+                                seen.add(key)
+                except json.JSONDecodeError as e:
+                    print(f"Error parsing JSONL at line {line_num+1}: {e}", file=sys.stderr)
+                    # Continue to the next line even if this one failed
+                    continue
+                    
+        if not headers:
+            print(f"Failed to extract headers from {file_path} as JSON or JSONL", file=sys.stderr)
+            
     return headers
 
 def extract_headers_from_sql(file_path: str) -> List[str]:

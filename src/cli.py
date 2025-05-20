@@ -43,14 +43,13 @@ def parse_args():
         description="Field Normalizer - Extract and normalize fields from various data sources"
     )
     
-    subparsers = parser.add_subparsers(dest="command", help="Command to run")
+    # Add common arguments to the main parser
+    parser.add_argument(
+        "--config",
+        help="Path to configuration file (JSON format)",
+    )
     
-    # Common arguments for all commands
-    for cmd_parser in [parser, subparsers.add_parser("analyze"), subparsers.add_parser("extract"), subparsers.add_parser("process")]:
-        cmd_parser.add_argument(
-            "--config",
-            help="Path to configuration file (JSON format)",
-        )
+    subparsers = parser.add_subparsers(dest="command", help="Command to run")
     
     # 1. Analyze command - for analyzing files and creating mappings
     analyze_parser = subparsers.add_parser(
@@ -146,6 +145,23 @@ def parse_args():
     process_parser = subparsers.add_parser(
         "process",
         help="Analyze files and extract data in one step"
+    )
+    process_parser.add_argument(
+        "--max-files",
+        "-n",
+        type=int,
+        help="Maximum number of files to process per directory",
+    )
+    process_parser.add_argument(
+        "--file-types",
+        nargs="+",
+        default=["csv", "json"],
+        help="File types to process (default: csv json, optional: txt, sql)",
+    )
+    process_parser.add_argument(
+        "paths",
+        nargs="+",
+        help="Paths to process (files or directories)",
     )
     process_parser.add_argument(
         "--analysis-output",
@@ -436,8 +452,16 @@ async def async_main():
             mapper = AIFieldMapper([])  # Initialize with empty target fields
             mapper.load_mappings(args.mappings)
         else:
-            mapper = FieldMapper()
-            mapper.load_mappings(args.mappings)
+            # First load the mappings file to get target fields
+            try:
+                with open(args.mappings, 'r') as f:
+                    mappings_data = json.load(f)
+                target_fields = mappings_data.get('target_fields', DEFAULT_TARGET_FIELDS)
+                mapper = FieldMapper(target_fields)
+                mapper.load_mappings(args.mappings)
+            except Exception as e:
+                print(f"Error loading mappings file: {str(e)}", file=sys.stderr)
+                sys.exit(1)
         
         # Get file paths from mappings
         file_paths = mapper.get_all_file_paths()

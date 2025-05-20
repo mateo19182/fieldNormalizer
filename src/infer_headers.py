@@ -93,7 +93,8 @@ def generate_headers_with_openrouter(sample_data: List[List[str]], num_columns: 
         ],
         "max_tokens": 150
     }
-    
+    print(f"Generating headers for {filename}...")
+
     try:
         response = requests.post(
             "https://openrouter.ai/api/v1/chat/completions",
@@ -124,7 +125,6 @@ def generate_headers_with_openrouter(sample_data: List[List[str]], num_columns: 
                     headers.extend([f"Column_{i+1}" for i in range(len(headers), num_columns)])
                 else:
                     headers = headers[:num_columns]
-            
             return headers
         except json.JSONDecodeError:
             print(f"Error parsing API response as JSON: {content}")

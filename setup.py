@@ -8,6 +8,7 @@ setup(
         "python-dotenv",
         "requests",
         "tqdm",
+        "aiohttp"
     ],
     entry_points={
         'console_scripts': [

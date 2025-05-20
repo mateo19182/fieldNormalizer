@@ -33,7 +33,7 @@ FIELD_PATTERNS = {
         r'telefono',
         r'telefono.?cellulare',
     ],
-    'name': [
+    'firstname': [
         r'^name$',
         r'^nome$',
         r'first.?name',
@@ -41,6 +41,10 @@ FIELD_PATTERNS = {
         r'display.?name',
         r'full.?name',
         r'nombre',
+        r'given.?name',
+        r'givenname',
+        r'first',
+        r'first.?name',
     ],
     'lastname': [
         r'cognome',
@@ -191,7 +195,7 @@ def group_fields(headers: List[str]) -> Dict[str, Set[str]]:
     field_groups = {
         'email': set(),
         'phone': set(),
-        'name': set(),
+        'firstname': set(),
         'lastname': set(),
         'username': set(),
         'address': set(),
@@ -222,7 +226,7 @@ def validate_field_value(field_type: str, value: str) -> Any:
     value = value.strip()
     
     # Discard names with more than 50 characters
-    if field_type == 'name' and len(value) > 50:
+    if field_type == 'firstname' and len(value) > 50:
         return None
         
     # Discard phone numbers that contain alphabetic characters (words)
