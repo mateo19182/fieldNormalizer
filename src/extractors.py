@@ -7,6 +7,7 @@ import os
 import sys
 import re
 from typing import List, Set, Tuple
+from .infer_headers import sample_csv_data, generate_headers_with_openrouter, update_csv_with_headers
 
 
 def extract_headers_from_file(file_path: str) -> Tuple[Set[str], bool]:
@@ -47,7 +48,7 @@ def has_valid_headers(headers: List[str]) -> bool:
         if header.strip().isdigit() or header.strip() == ' ':
             return False
         # Skip very long headers (likely data rows)
-        if len(header) > 100:
+        if len(header) > 1000:
             return False
         # Skip headers that have url or emails
         if "@" in header or "http" in header or "www" in header:
@@ -117,7 +118,6 @@ def extract_headers_from_csv(file_path: str) -> Tuple[Set[str], bool]:
                     return set(headers), False  # Valid headers found, no inference needed
                     
                 # If headers don't look valid, try to infer them
-                from field_normalizer.infer_headers import sample_csv_data, generate_headers_with_openrouter, update_csv_with_headers
                 
                 # Get sample data for inference
                 f.seek(0)

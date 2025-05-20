@@ -6,9 +6,12 @@ import json
 import os
 import random
 import requests
+import aiohttp
+import asyncio
 from typing import Dict, List, Set, Any, Optional, Tuple
 import dotenv
 import csv
+from tqdm import tqdm
 from src.field_normalizer import normalize_field_name
 
 dotenv.load_dotenv(".env")
@@ -30,35 +33,69 @@ class AIFieldMapper:
         self.data_description = data_description
         self.file_mappings: Dict[str, Dict[str, str]] = {}
         self.api_responses: Dict[str, Any] = {}  # Store API responses for logging
+        self._session: Optional[aiohttp.ClientSession] = None
         
-    def build_mappings(self, file_metadata: List[Dict[str, Any]]) -> None:
+    async def __aenter__(self):
+        """Async context manager entry."""
+        self._session = aiohttp.ClientSession()
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit."""
+        if self._session:
+            await self._session.close()
+            self._session = None
+    
+    async def build_mappings(self, file_metadata: List[Dict[str, Any]]) -> None:
         """
         Build field mappings for all files based on their headers using AI.
         
         Args:
             file_metadata: List of dicts with file metadata including headers
         """
-        for file_info in file_metadata:
-            file_path = file_info['path']
-            headers = file_info['headers']
+        if not self._session:
+            self._session = aiohttp.ClientSession()
+        
+        # Create progress bar
+        pbar = tqdm(total=len(file_metadata), desc="Processing files")
+        
+        try:
+            tasks = []
+            for file_info in file_metadata:
+                file_path = file_info['path']
+                headers = file_info['headers']
+                
+                # Get sample data from the file
+                sample_data, sample_format = self._get_sample_data(file_path, headers)
+                
+                # Create mapping for this file
+                self.file_mappings[file_path] = {}
+                
+                # Create task for mapping headers
+                task = asyncio.create_task(
+                    self._map_headers_with_ai(headers, file_path, sample_data, sample_format)
+                )
+                tasks.append((file_path, task))
             
-            # Get sample data from the file
-            sample_data, sample_format = self._get_sample_data(file_path, headers)
-            
-            # Create mapping for this file
-            self.file_mappings[file_path] = {}
-            
-            # Map headers to target fields using AI and determine relevance
-            header_mappings, is_relevant = self._map_headers_with_ai(headers, file_path, sample_data, sample_format)
-            
-            # Only store mappings if the file is relevant
-            if is_relevant:
-                for header, target_field in header_mappings.items():
-                    if target_field in self.target_fields:
-                        self.file_mappings[file_path][header] = target_field
-            else:
-                # Create an empty mapping to indicate the file was processed but deemed irrelevant
-                print(f"File {os.path.basename(file_path)} was deemed irrelevant to the target fields and will be skipped.")
+            # Process all tasks and update progress
+            for file_path, task in tasks:
+                try:
+                    header_mappings, is_relevant = await task
+                    
+                    # Only store mappings if the file is relevant
+                    if is_relevant:
+                        for header, target_field in header_mappings.items():
+                            if target_field in self.target_fields:
+                                self.file_mappings[file_path][header] = target_field
+                    else:
+                        # Create an empty mapping to indicate the file was processed but deemed irrelevant
+                        print(f"File {os.path.basename(file_path)} was deemed irrelevant to the target fields and will be skipped.")
+                except Exception as e:
+                    print(f"Error processing {file_path}: {str(e)}")
+                finally:
+                    pbar.update(1)
+        finally:
+            pbar.close()
     
     def _get_sample_data(self, file_path: str, headers: List[str], max_samples: int = 2) -> Tuple[Any, str]:
         """
@@ -199,7 +236,7 @@ class AIFieldMapper:
             "empty_sample": {header: "" for header in headers[:min(5, len(headers))]}
         }, "unknown"
     
-    def _map_headers_with_ai(self, headers: List[str], file_path: str, sample_data: Any, sample_format: str) -> Tuple[Dict[str, str], bool]:
+    async def _map_headers_with_ai(self, headers: List[str], file_path: str, sample_data: Any, sample_format: str) -> Tuple[Dict[str, str], bool]:
         """
         Use AI to map headers to target fields and determine if the file is relevant.
         
@@ -242,7 +279,7 @@ Task 2: For each source field, determine which target field it should map to. If
 Return your answer as a JSON object with the following structure:
 {{
     "is_relevant": true/false,
-    "reason": "Brief explanation of why the file is relevant or not",
+    "reason": "Short and concise explanation of why the file is relevant or not",
     "mappings": {{
         "source_field1": "target_field1",
         "source_field2": "target_field2",
@@ -269,16 +306,14 @@ JSON response:
         }
         
         try:
-            response = requests.post(
+            async with self._session.post(
                 "https://openrouter.ai/api/v1/chat/completions",
                 headers=headers_dict,
                 json=data
-            )
-            response.raise_for_status()
-            
-            # Extract the generated mapping from the response
-            result = response.json()
-            content = result['choices'][0]['message']['content']
+            ) as response:
+                response.raise_for_status()
+                result = await response.json()
+                content = result['choices'][0]['message']['content']
             
             # Store the API response for logging
             self.api_responses[os.path.basename(file_path)] = {
@@ -328,7 +363,7 @@ JSON response:
                 print(f"Error parsing API response as JSON for {file_path}: {content}")
                 return {}, False
                 
-        except requests.exceptions.RequestException as e:
+        except aiohttp.ClientError as e:
             print(f"API request error for {file_path}: {e}")
             return {}, False
     
@@ -571,7 +606,7 @@ JSON response:
         return stats
 
 
-def create_ai_field_mappings(file_metadata: List[Dict[str, Any]], target_fields: List[str], data_description: str = "") -> AIFieldMapper:
+async def create_ai_field_mappings(file_metadata: List[Dict[str, Any]], target_fields: List[str], data_description: str = "") -> AIFieldMapper:
     """
     Create AI-based field mappings from file metadata.
     
@@ -583,9 +618,9 @@ def create_ai_field_mappings(file_metadata: List[Dict[str, Any]], target_fields:
     Returns:
         AIFieldMapper instance with the mappings
     """
-    mapper = AIFieldMapper(target_fields, data_description)
-    mapper.build_mappings(file_metadata)
-    return mapper
+    async with AIFieldMapper(target_fields, data_description) as mapper:
+        await mapper.build_mappings(file_metadata)
+        return mapper
 
 
 def format_ai_mappings_report(mapper: AIFieldMapper) -> str:

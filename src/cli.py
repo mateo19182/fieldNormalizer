@@ -7,6 +7,7 @@ import argparse
 import os
 import sys
 import json
+import asyncio
 from typing import Dict, List, Set, Tuple, Any
 from tqdm import tqdm
 
@@ -36,7 +37,7 @@ def parse_args():
     common_parser.add_argument(
         "--file-types",
         nargs="+",
-        default=["csv", "json", "sql"],
+        default=["csv", "json"],
         help="File extensions to process (default: csv, json, sql)",
     )
     common_parser.add_argument(
@@ -278,8 +279,8 @@ def process_files(file_paths: List[str]) -> Tuple[Dict[str, Dict[str, Any]], Lis
     return header_stats, file_metadata, all_headers
 
 
-def main():
-    """Main entry point for the CLI."""
+async def async_main():
+    """Async main entry point for the CLI."""
     args = parse_args()
     
     if not args.command:
@@ -310,7 +311,7 @@ def main():
             print(f"Using AI to create field mappings with target fields: {', '.join(target_fields)}")
             if data_description:
                 print(f"Using data description: \"{data_description}\"")
-            mapper = create_ai_field_mappings(file_metadata, target_fields, data_description)
+            mapper = await create_ai_field_mappings(file_metadata, target_fields, data_description)
             mappings_report = format_ai_mappings_report(mapper)
         else:
             # Use traditional regex-based field mapping
@@ -388,20 +389,6 @@ def main():
                 report_lines.append(api_data["response"])
                 report_lines.append("```")
                 report_lines.append("")
-                
-                # Add final mappings if available
-                if file_name in [os.path.basename(path) for path in mapper.file_mappings]:
-                    file_path = next(path for path in mapper.file_mappings if os.path.basename(path) == file_name)
-                    file_mappings = mapper.file_mappings[file_path]
-                    
-                    report_lines.append("Final Mappings:")
-                    report_lines.append("```json")
-                    report_lines.append(json.dumps(file_mappings, indent=2))
-                    report_lines.append("```")
-                    report_lines.append("")
-                
-                report_lines.append("-" * 80)
-                report_lines.append("")
         
         # Output the report
         report = "\n".join(report_lines)
@@ -461,7 +448,7 @@ def main():
             print(f"Using AI to create field mappings with target fields: {', '.join(target_fields)}")
             if data_description:
                 print(f"Using data description: \"{data_description}\"")
-            mapper = create_ai_field_mappings(file_metadata, target_fields, data_description)
+            mapper = await create_ai_field_mappings(file_metadata, target_fields, data_description)
             mappings_report = format_ai_mappings_report(mapper)
         else:
             # Use traditional regex-based field mapping
@@ -661,6 +648,11 @@ def format_field_variations(field_variations: Dict[str, Dict[str, Dict[str, List
         lines.append("")
     
     return "\n".join(lines)
+
+
+def main():
+    """Main entry point that runs the async main function."""
+    asyncio.run(async_main())
 
 
 if __name__ == "__main__":
