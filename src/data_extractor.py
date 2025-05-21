@@ -575,22 +575,22 @@ def deduplicate_records(records: Iterator[Dict[str, Any]]) -> Iterator[Dict[str,
     Yields:
         Deduplicated records
     """
+    import json
     seen_records = set()
-    
+
     for record in records:
         # First deduplicate values within the record
         record = deduplicate_record_values(record)
-        
-        # Create a hashable representation of the record for deduplication
-        # We exclude the _source_file field from the hash to deduplicate across files
-        record_hash = hash(frozenset({
-            k: tuple(v) if isinstance(v, list) else v 
-            for k, v in record.items() 
-            if k != '_source_file'
-        }.items()))
-        
-        if record_hash not in seen_records:
-            seen_records.add(record_hash)
+        # Exclude '_source_file' from deduplication key
+        record_no_source = {k: v for k, v in record.items() if k != '_source_file'}
+        # Use canonical JSON serialization for robust, order-insensitive hashing
+        try:
+            record_key = json.dumps(record_no_source, sort_keys=True, separators=(',', ':'))
+        except TypeError:
+            # Fallback: convert non-serializable objects to string
+            record_key = json.dumps({k: str(v) for k, v in record_no_source.items()}, sort_keys=True, separators=(',', ':'))
+        if record_key not in seen_records:
+            seen_records.add(record_key)
             yield record
 
 def process_batch(batch: List[Dict[str, Any]], group_by_email: bool, batch_num: int) -> List[Dict[str, Any]]:
