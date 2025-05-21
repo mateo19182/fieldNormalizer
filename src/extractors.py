@@ -305,50 +305,156 @@ def extract_headers_from_json(file_path: str) -> List[str]:
     headers = []
     seen = set()
     
-    # First try parsing as regular JSON
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-            
-        def extract_keys(obj, prefix=''):
-            if isinstance(obj, dict):
-                for key, value in obj.items():
-                    if key not in seen:
-                        headers.append(key)
-                        seen.add(key)
-                    if isinstance(value, (dict, list)):
-                        extract_keys(value, f"{prefix}{key}.")
-            elif isinstance(obj, list) and obj:
-                # Process the first item as a representative
-                extract_keys(obj[0], prefix)
+    # Check if file is JSONL based on extension
+    _, ext = os.path.splitext(file_path)
+    is_jsonl = ext.lower() == '.jsonl'
+    
+    # For JSONL files, skip trying to parse as regular JSON
+    if is_jsonl:
+        # Sample a subset of lines for very large files
+        total_lines = 0
+        sample_limit = 10000  # Maximum number of lines to sample
         
-        extract_keys(data)
-        
-    except json.JSONDecodeError:
-        # If regular JSON parsing fails, try parsing as JSONL (JSON Lines)
-        # print(f"JSON parsing failed for {file_path}, trying JSONL format", file=sys.stderr)
-        with open(file_path, 'r', encoding='utf-8') as f:
-            # Process each line as a separate JSON object
-            for line_num, line in enumerate(f):
-                line = line.strip()
-                if not line:
-                    continue
+        try:
+            file_size = os.path.getsize(file_path)
+            if file_size > 100_000_000:  # If > 100MB, use sampling
+                print(f"Large JSONL file detected ({file_size/1_000_000:.1f} MB), sampling headers", file=sys.stderr)
+                # Sample from beginning, middle, and end of file
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    # Sample first 1000 lines
+                    for _ in range(min(1000, sample_limit // 3)):
+                        line = f.readline()
+                        if not line:
+                            break
+                        line = line.strip()
+                        total_lines += 1
+                        if line:
+                            try:
+                                obj = json.loads(line)
+                                if isinstance(obj, dict):
+                                    for key in obj.keys():
+                                        if key not in seen:
+                                            headers.append(key)
+                                            seen.add(key)
+                            except json.JSONDecodeError:
+                                continue
                     
-                try:
-                    obj = json.loads(line)
-                    if isinstance(obj, dict):
-                        for key in obj.keys():
-                            if key not in seen:
-                                headers.append(key)
-                                seen.add(key)
-                except json.JSONDecodeError as e:
-                    print(f"Error parsing JSONL at line {line_num+1}: {e}", file=sys.stderr)
-                    # Continue to the next line even if this one failed
-                    continue
+                    # Sample from middle (approximate)
+                    try:
+                        mid_pos = file_size // 2
+                        f.seek(mid_pos)
+                        f.readline()  # Skip partial line
+                        for _ in range(min(1000, sample_limit // 3)):
+                            line = f.readline()
+                            if not line:
+                                break
+                            line = line.strip()
+                            total_lines += 1
+                            if line:
+                                try:
+                                    obj = json.loads(line)
+                                    if isinstance(obj, dict):
+                                        for key in obj.keys():
+                                            if key not in seen:
+                                                headers.append(key)
+                                                seen.add(key)
+                                except json.JSONDecodeError:
+                                    continue
+                    except:
+                        pass  # Skip middle sampling if it fails
                     
-        if not headers:
-            print(f"Failed to extract headers from {file_path} as JSON or JSONL", file=sys.stderr)
+                    # Sample from end (approximate)
+                    try:
+                        end_pos = max(0, file_size - 50000)  # Last ~50KB
+                        f.seek(end_pos)
+                        f.readline()  # Skip partial line
+                        for _ in range(min(1000, sample_limit // 3)):
+                            line = f.readline()
+                            if not line:
+                                break
+                            line = line.strip()
+                            total_lines += 1
+                            if line:
+                                try:
+                                    obj = json.loads(line)
+                                    if isinstance(obj, dict):
+                                        for key in obj.keys():
+                                            if key not in seen:
+                                                headers.append(key)
+                                                seen.add(key)
+                                except json.JSONDecodeError:
+                                    continue
+                    except:
+                        pass  # Skip end sampling if it fails
+            else:
+                # For smaller files, process all lines
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    for line_num, line in enumerate(f):
+                        line = line.strip()
+                        total_lines += 1
+                        if not line:
+                            continue
+                            
+                        try:
+                            obj = json.loads(line)
+                            if isinstance(obj, dict):
+                                for key in obj.keys():
+                                    if key not in seen:
+                                        headers.append(key)
+                                        seen.add(key)
+                        except json.JSONDecodeError as e:
+                            print(f"Error parsing JSONL at line {line_num+1}: {e}", file=sys.stderr)
+                            continue
+                            
+            print(f"Extracted {len(headers)} unique headers from JSONL file (sampled {total_lines} lines)", file=sys.stderr)
             
+        except Exception as e:
+            print(f"Error processing JSONL file {file_path}: {str(e)}", file=sys.stderr)
+    else:
+        # Standard JSON processing for non-JSONL files
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                
+            def extract_keys(obj, prefix=''):
+                if isinstance(obj, dict):
+                    for key, value in obj.items():
+                        if key not in seen:
+                            headers.append(key)
+                            seen.add(key)
+                        if isinstance(value, (dict, list)):
+                            extract_keys(value, f"{prefix}{key}.")
+                elif isinstance(obj, list) and obj:
+                    # Process the first item as a representative
+                    extract_keys(obj[0], prefix)
+            
+            extract_keys(data)
+            
+        except json.JSONDecodeError:
+            # If regular JSON parsing fails, try parsing as JSONL (JSON Lines)
+            # print(f"JSON parsing failed for {file_path}, trying JSONL format", file=sys.stderr)
+            with open(file_path, 'r', encoding='utf-8') as f:
+                # Process each line as a separate JSON object
+                for line_num, line in enumerate(f):
+                    line = line.strip()
+                    if not line:
+                        continue
+                        
+                    try:
+                        obj = json.loads(line)
+                        if isinstance(obj, dict):
+                            for key in obj.keys():
+                                if key not in seen:
+                                    headers.append(key)
+                                    seen.add(key)
+                    except json.JSONDecodeError as e:
+                        print(f"Error parsing JSONL at line {line_num+1}: {e}", file=sys.stderr)
+                        # Continue to the next line even if this one failed
+                        continue
+                        
+            if not headers:
+                print(f"Failed to extract headers from {file_path} as JSON or JSONL", file=sys.stderr)
+                
     return headers
 
 def extract_headers_from_sql(file_path: str) -> List[str]:

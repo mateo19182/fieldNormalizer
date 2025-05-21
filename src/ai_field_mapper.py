@@ -642,26 +642,26 @@ def format_ai_mappings_report(mapper: AIFieldMapper) -> str:
         lines.append(f"  - {field}: {count}")
     lines.append("")
     
-    # Show mappings by file
-    lines.append("Mappings by File:")
-    lines.append("=" * 80)
+    # # Show mappings by file
+    # lines.append("Mappings by File:")
+    # lines.append("=" * 80)
     
-    for file_path, mappings in mapper.get_all_mappings().items():
-        # Skip files with fewer than 2 mappings
-        if len(mappings) < 2:
-            continue
+    # for file_path, mappings in mapper.get_all_mappings().items():
+    #     # Skip files with fewer than 2 mappings
+    #     if len(mappings) < 2:
+    #         continue
             
-        basename = os.path.basename(file_path)
-        lines.append(f"\n{basename} ({file_path})")
-        lines.append("-" * len(basename))
+    #     basename = os.path.basename(file_path)
+    #     lines.append(f"\n{basename} ({file_path})")
+    #     lines.append("-" * len(basename))
         
-        # Group by target field
-        inverse_mapping = mapper.get_inverse_mapping(file_path)
+    #     # Group by target field
+    #     inverse_mapping = mapper.get_inverse_mapping(file_path)
         
-        for target_field in mapper.target_fields:
-            headers = inverse_mapping.get(target_field, [])
-            if headers:
-                lines.append(f"{target_field}: {', '.join(headers)}")
+    #     for target_field in mapper.target_fields:
+    #         headers = inverse_mapping.get(target_field, [])
+    #         if headers:
+    #             lines.append(f"{target_field}: {', '.join(headers)}")
     
     # Add detailed mapping outcomes section
     lines.append("\n\nDetailed Mapping Outcomes:")

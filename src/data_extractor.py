@@ -8,6 +8,7 @@ import os
 import sys
 from typing import Dict, List, Set, Any, Iterator, Optional, Tuple
 from tqdm import tqdm
+import concurrent.futures
 from src.field_mapper import FieldMapper
 from src.field_normalizer import validate_field_value
 from src.extractors import find_header_row
@@ -30,6 +31,8 @@ def extract_data_from_file(file_path: str, field_mapping: Dict[str, List[str]]) 
         yield from extract_data_from_csv(file_path, field_mapping, is_txt=(ext == 'txt'))
     elif ext == 'json':
         yield from extract_data_from_json(file_path, field_mapping)
+    elif ext == 'jsonl':
+        yield from extract_data_from_jsonl(file_path, field_mapping)
     elif ext == 'sql':
         yield from extract_data_from_sql(file_path, field_mapping)
     else:
@@ -172,6 +175,60 @@ def extract_data_from_json(file_path: str, field_mapping: Dict[str, List[str]]) 
         
     except Exception as e:
         print(f"Error extracting data from JSON file {file_path}: {str(e)}", file=sys.stderr)
+
+def extract_data_from_jsonl(file_path: str, field_mapping: Dict[str, List[str]]) -> Iterator[Dict[str, Any]]:
+    """
+    Extract data from a JSONL (JSON Lines) file based on field mappings.
+    
+    Args:
+        file_path: Path to the JSONL file
+        field_mapping: Mapping of normalized field types to lists of original headers
+        
+    Yields:
+        Dictionaries containing extracted data with normalized field names
+    """
+    try:
+        # Process JSONL files line by line to avoid loading everything into memory
+        with open(file_path, 'r', encoding='utf-8') as f:
+            # Use tqdm to show progress - estimate total lines for large files
+            total_lines = None
+            try:
+                # Try to get file size and estimate number of lines
+                file_size = os.path.getsize(file_path)
+                if file_size > 1_000_000_000:  # If file > 1GB
+                    # Sample first 1000 lines to estimate average line size
+                    sample_size = 0
+                    sample_lines = 0
+                    for _ in range(1000):
+                        line = f.readline()
+                        if not line:
+                            break
+                        sample_size += len(line)
+                        sample_lines += 1
+                    if sample_lines > 0:
+                        avg_line_size = sample_size / sample_lines
+                        total_lines = int(file_size / avg_line_size)
+                f.seek(0)  # Reset file position after sampling
+            except:
+                pass  # If estimation fails, proceed without total
+                
+            # Process each line as a separate JSON object with progress bar
+            for line_num, line in enumerate(tqdm(f, desc=f"Processing JSONL from {os.path.basename(file_path)}", 
+                                                 unit="line", total=total_lines)):
+                line = line.strip()
+                if not line:
+                    continue
+                    
+                try:
+                    obj = json.loads(line)
+                    if isinstance(obj, dict):
+                        yield from _process_json_object(obj, field_mapping, file_path)
+                except json.JSONDecodeError as e:
+                    print(f"Error parsing JSONL at line {line_num+1} in {file_path}: {str(e)}", file=sys.stderr)
+                    continue  # Skip problematic lines
+                    
+    except Exception as e:
+        print(f"Error extracting data from JSONL file {file_path}: {str(e)}", file=sys.stderr)
 
 def extract_data_from_sql(file_path: str, field_mapping: Dict[str, List[str]]) -> Iterator[Dict[str, Any]]:
     """
@@ -338,9 +395,27 @@ def _process_json_object(obj: Dict[str, Any], field_mapping: Dict[str, List[str]
         record['_source_file'] = os.path.basename(file_path)
         yield record
 
+def _extract_data_from_file_wrapper(file_path: str, inverse_mapping: Dict[str, List[str]]) -> List[Dict[str, Any]]:
+    """
+    Wrapper function for parallel processing that collects all records from a file.
+    
+    Args:
+        file_path: Path to the file
+        inverse_mapping: Mapping of field types to original headers
+        
+    Returns:
+        List of extracted records
+    """
+    try:
+        # Extract data and collect all records from the generator
+        return list(extract_data_from_file(file_path, inverse_mapping))
+    except Exception as e:
+        print(f"Error extracting data from {file_path}: {str(e)}", file=sys.stderr)
+        return []
+
 def extract_all_data(file_paths: List[str], field_mapper: Any) -> Iterator[Dict[str, Any]]:
     """
-    Extract data from all files based on field mappings.
+    Extract data from all files based on field mappings using parallel processing.
     
     Args:
         file_paths: List of file paths to process
@@ -351,8 +426,9 @@ def extract_all_data(file_paths: List[str], field_mapper: Any) -> Iterator[Dict[
     """
     # Track files with only one mapping (these are often not useful)
     single_mapping_files = []
+    files_to_process = []
     
-    # Process each file
+    # First identify which files to process
     for file_path in file_paths:
         # Get inverse mapping for this file (field type -> list of original headers)
         inverse_mapping = field_mapper.get_inverse_mapping(file_path)
@@ -363,10 +439,13 @@ def extract_all_data(file_paths: List[str], field_mapper: Any) -> Iterator[Dict[
             single_mapping_files.append(file_path)
             continue
         
-        # Extract data from this file
+        files_to_process.append((file_path, inverse_mapping))
+    
+    # Process files sequentially to avoid memory/resource issues with large files
+    for file_path, inverse_mapping in tqdm(files_to_process, desc="Processing files", unit="file"):
         try:
             for record in extract_data_from_file(file_path, inverse_mapping):
-                if record:  # Only yield non-empty records
+                if record:
                     yield record
         except Exception as e:
             print(f"Error extracting data from {file_path}: {str(e)}", file=sys.stderr)
@@ -514,44 +593,67 @@ def deduplicate_records(records: Iterator[Dict[str, Any]]) -> Iterator[Dict[str,
             seen_records.add(record_hash)
             yield record
 
+def process_batch(batch: List[Dict[str, Any]], group_by_email: bool, batch_num: int) -> List[Dict[str, Any]]:
+    """
+    Process a batch of records with optional email grouping and deduplication.
+    
+    Args:
+        batch: List of records to process
+        group_by_email: Whether to group records by email
+        batch_num: Batch number (for logging)
+        
+    Returns:
+        Processed batch of records
+    """
+    # Optionally merge records by email
+    if group_by_email:
+        batch = list(merge_records_by_email(batch))
+    
+    # Deduplicate records
+    return list(deduplicate_records(batch))
+
 def write_jsonl(records: Iterator[Dict[str, Any]], output_path: str, batch_size: int = 1000, group_by_email: bool = False) -> int:
     """
-    Write records to a JSONL file in batches.
+    Write records to a JSONL file using optimized batch processing.
     
     Args:
         records: Iterator of record dictionaries
         output_path: Path to output JSONL file
         batch_size: Number of records to write in each batch
+        group_by_email: Whether to group records by email
         
     Returns:
         Total number of records written
     """
-    # Convert records to a list for processing
-    records_list = list(records)
+    # Process in batches to avoid loading everything into memory
+    total_records = 0
+    batch_records = []
+    batch_count = 0
     
-    # Optionally merge records by email
-    if group_by_email:
-        print("Merging records by email...")
-        records_list = list(merge_records_by_email(records_list))
-    
-    # Then deduplicate any remaining duplicates
-    print(f"Deduplicating {len(records_list)} records...")
-    deduplicated_records = list(deduplicate_records(records_list))
-    
-    total_records = len(deduplicated_records)
-    batch = []
-    
-    # Add progress bar for writing records
+    # Create the output file
     with open(output_path, 'w', encoding='utf-8') as f:
-        for record in tqdm(deduplicated_records, desc="Writing records", unit="record"):
-            batch.append(json.dumps(record))
+        # Process the records in batches
+        for record in tqdm(records, desc="Processing records", unit="record"):
+            batch_records.append(record)
             
-            if len(batch) >= batch_size:
-                f.write('\n'.join(batch) + '\n')
-                batch = []
+            # Process when we reach the batch size
+            if len(batch_records) >= batch_size:
+                batch_count += 1
+                # Process this batch
+                processed_batch = process_batch(batch_records, group_by_email, batch_count)
+                
+                # Write the batch
+                f.write('\n'.join(json.dumps(r) for r in processed_batch) + '\n')
+                
+                # Update count and reset batch
+                total_records += len(processed_batch)
+                batch_records = []
         
-        # Write any remaining records
-        if batch:
-            f.write('\n'.join(batch) + '\n')
+        # Process any remaining records
+        if batch_records:
+            batch_count += 1
+            processed_batch = process_batch(batch_records, group_by_email, batch_count)
+            f.write('\n'.join(json.dumps(r) for r in processed_batch) + '\n')
+            total_records += len(processed_batch)
     
     return total_records

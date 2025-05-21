@@ -209,21 +209,21 @@ def format_mappings_report(mapper: FieldMapper) -> str:
         lines.append(f"  - {field}: {count}")
     lines.append("")
     
-    # Show mappings by file
-    lines.append("Mappings by File:")
-    lines.append("=" * 80)
+    # # Show mappings by file
+    # lines.append("Mappings by File:")
+    # lines.append("=" * 80)
     
-    for file_path, mappings in mapper.get_all_mappings().items():
-        basename = os.path.basename(file_path)
-        lines.append(f"\n{basename} ({file_path})")
-        lines.append("-" * len(basename))
+    # for file_path, mappings in mapper.get_all_mappings().items():
+    #     basename = os.path.basename(file_path)
+    #     lines.append(f"\n{basename} ({file_path})")
+    #     lines.append("-" * len(basename))
         
-        # Group by normalized field type
-        inverse_mapping = mapper.get_inverse_mapping(file_path)
+    #     # Group by normalized field type
+    #     inverse_mapping = mapper.get_inverse_mapping(file_path)
         
-        for field_type in mapper.target_fields:
-            headers = inverse_mapping.get(field_type, [])
-            if headers:
-                lines.append(f"{field_type}: {', '.join(headers)}")
+    #     for field_type in mapper.target_fields:
+    #         headers = inverse_mapping.get(field_type, [])
+    #         if headers:
+    #             lines.append(f"{field_type}: {', '.join(headers)}")
     
     return "\n".join(lines)

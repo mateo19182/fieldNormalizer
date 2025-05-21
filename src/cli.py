@@ -8,6 +8,7 @@ import os
 import sys
 import json
 import asyncio
+import concurrent.futures
 from typing import Dict, List, Set, Tuple, Any
 from tqdm import tqdm
 
@@ -65,7 +66,7 @@ def parse_args():
     analyze_parser.add_argument(
         "--file-types",
         nargs="+",
-        default=["csv", "json"],
+        default=["csv", "json", "jsonl"],
         help="File types to process (default: csv json, optional: txt, sql)",
     )
     analyze_parser.add_argument(
@@ -218,9 +219,24 @@ def parse_args():
     return parser.parse_args()
 
 
+# Helper function for directory processing - must be at module level for pickability
+def process_directory(directory, file_types, max_files):
+    dir_files = []
+    for root, _, files in os.walk(directory):
+        for file in files:
+            if any(file.endswith(f".{ext}") for ext in file_types):
+                dir_files.append(os.path.join(root, file))
+    
+    # Limit the number of files from this directory if max_files is specified
+    if max_files is not None and max_files > 0:
+        dir_files = dir_files[:max_files]
+        
+    return dir_files
+
+
 def find_data_files(paths: List[str], file_types: List[str], max_files: int = None) -> List[str]:
     """
-    Find all data files with the specified extensions in the given paths.
+    Find all data files with the specified extensions in the given paths using parallel processing.
     Paths can be directories or individual files.
     
     Args:
@@ -232,22 +248,13 @@ def find_data_files(paths: List[str], file_types: List[str], max_files: int = No
         List of absolute paths to matching data files
     """
     data_files = []
+    directories = []
     
+    # First separate directories from individual files
     for path in paths:
         # Check if the path is a directory
         if os.path.isdir(path):
-            dir_files = []
-            for root, _, files in os.walk(path):
-                for file in files:
-                    if any(file.endswith(f".{ext}") for ext in file_types):
-                        dir_files.append(os.path.join(root, file))
-            
-            # Limit the number of files from this directory if max_files is specified
-            if max_files is not None and max_files > 0:
-                dir_files = dir_files[:max_files]
-                
-            data_files.extend(dir_files)
-        
+            directories.append(path)
         # Check if the path is a file
         elif os.path.isfile(path):
             _, ext = os.path.splitext(path)
@@ -257,17 +264,44 @@ def find_data_files(paths: List[str], file_types: List[str], max_files: int = No
                 data_files.append(path)
             else:
                 print(f"Warning: {path} is not a supported file type ({', '.join(file_types)}), skipping.", file=sys.stderr)
-        
         # Path is neither a file nor a directory
         else:
             print(f"Warning: {path} is not a valid file or directory, skipping.", file=sys.stderr)
-        
+    
+    # Process directories in parallel if there are more than one
+    if directories:
+        # Use parallel processing for multiple directories
+        if len(directories) > 1:
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                futures = [executor.submit(process_directory, directory, file_types, max_files) 
+                          for directory in directories]
+                for future in tqdm(concurrent.futures.as_completed(futures), 
+                                  total=len(futures), 
+                                  desc="Scanning directories", 
+                                  unit="dir"):
+                    dir_files = future.result()
+                    data_files.extend(dir_files)
+        else:
+            # Just process a single directory directly
+            dir_files = process_directory(directories[0], file_types, max_files)
+            data_files.extend(dir_files)
+            
     return data_files
+
+
+# Helper function for parallel processing - must be at module level for pickability
+def extract_headers_worker(file_path):
+    try:
+        # Extract headers from file
+        headers, headers_inferred = extract_headers_from_file(file_path)
+        return (file_path, headers, headers_inferred, None)
+    except Exception as e:
+        return (file_path, [], False, str(e))
 
 
 def process_files(file_paths: List[str]) -> Tuple[Dict[str, Dict[str, Any]], List[Dict[str, Any]], List[str]]:
     """
-    Process all files and extract headers.
+    Process all files and extract headers using parallel processing.
     
     Args:
         file_paths: List of file paths to process
@@ -280,10 +314,20 @@ def process_files(file_paths: List[str]) -> Tuple[Dict[str, Dict[str, Any]], Lis
     all_headers = []
     failed_files = {}
     
-    for file_path in tqdm(file_paths, desc="Processing files", unit="file"):
-        try:
-            # Extract headers from file
-            headers, headers_inferred = extract_headers_from_file(file_path)
+    # Process files in parallel
+    with concurrent.futures.ProcessPoolExecutor() as executor:
+        # Submit all tasks
+        futures = [executor.submit(extract_headers_worker, file_path) for file_path in file_paths]
+        
+        # Process results as they complete
+        for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), 
+                          desc="Processing files", unit="file"):
+            file_path, headers, headers_inferred, error = future.result()
+            
+            if error:
+                failed_files[file_path] = error
+                print(f"Error processing {file_path}: {error}", file=sys.stderr)
+                continue
             
             # Update header statistics
             for header in headers:
@@ -304,10 +348,6 @@ def process_files(file_paths: List[str]) -> Tuple[Dict[str, Dict[str, Any]], Lis
             
             # Add to all headers list
             all_headers.extend(headers)
-            
-        except Exception as e:
-            failed_files[file_path] = str(e)
-            print(f"Error processing {file_path}: {str(e)}", file=sys.stderr)
     
     # Remove duplicates from all_headers
     all_headers = list(set(all_headers))
@@ -370,74 +410,42 @@ async def async_main():
         mapper.save_mappings(args.mappings_output)
         print(f"Field mappings saved to {args.mappings_output}")
         
+        # Prepare extra info for report
+        import datetime
+        now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        file_list = [os.path.basename(f) for f in data_files]
+        file_list_str = "\n  - ".join(file_list[:10])
+        if len(file_list) > 10:
+            file_list_str += f"\n  ... and {len(file_list) - 10} more files"
+        # Build headers_per_file_str using finalized mappings
+        file_mappings = mapper.get_all_mappings()
+        headers_per_file_lines = []
+        for file_path in data_files:
+            mapping = file_mappings.get(file_path)
+            if mapping is None:
+                for k in file_mappings:
+                    if os.path.basename(k) == os.path.basename(file_path):
+                        mapping = file_mappings[k]
+                        break
+            mapped_count = len(mapping) if mapping else 0
+            # Find total headers for this file from file_metadata
+            total_headers = 0
+            for meta in file_metadata:
+                if meta.get('path') == file_path or os.path.basename(meta.get('path', '')) == os.path.basename(file_path):
+                    total_headers = len(meta.get('headers', []))
+                    break
+            headers_per_file_lines.append(f"{os.path.basename(file_path)}: {mapped_count}/{total_headers} headers")
+        headers_per_file_str = "\n  - " + "\n  - ".join(headers_per_file_lines[:10])
+        if len(headers_per_file_lines) > 10:
+            headers_per_file_str += f"\n  ... and {len(headers_per_file_lines) - 10} more files"
         # Generate analysis report
-        report_lines = [
-            "Field Normalizer Analysis Report",
-            "=" * 80,
-            "",
-            f"Total files analyzed: {len(data_files)}",
-            f"Total unique headers found: {len(all_headers)}",
-            ""
-        ]
-        
-        # Add field groups to report
-        if not args.no_normalize:
-            report_lines.append(format_field_groups(field_groups, header_stats))
-        
-        # Add field variations to report
-        if not args.no_variations and not args.no_normalize:
-            field_variations = analyze_field_variations(all_headers, header_stats)
-            report_lines.append(format_field_variations(field_variations, header_stats))
-        
-        # Add mappings report
-        report_lines.append("")
-        report_lines.append(mappings_report)
-        
-        # Add AI analysis section if AI was used
-        if args.use_ai:
-            report_lines.append("")
-            report_lines.append("AI Analysis Details")
-            report_lines.append("=" * 80)
-            report_lines.append("")
-            
-            for file_name, api_data in mapper.api_responses.items():
-                report_lines.append(f"File: {file_name}")
-                report_lines.append("-" * (len(file_name) + 6))
-                report_lines.append("")
-                
-                # Add headers
-                report_lines.append("Headers:")
-                report_lines.append("```")
-                report_lines.append(", ".join(api_data["headers"]))
-                report_lines.append("```")
-                report_lines.append("")
-                
-                # Add sample data in native format
-                report_lines.append(f"Sample Data ({api_data.get('sample_format', 'unknown').upper()}):")
-                report_lines.append("```")
-                if "sample_display" in api_data:
-                    report_lines.append(api_data["sample_display"])
-                else:
-                    report_lines.append(json.dumps(api_data["sample_data"], indent=2))
-                report_lines.append("```")
-                report_lines.append("")
-                
-                # Add prompt
-                report_lines.append("AI Prompt:")
-                report_lines.append("```")
-                report_lines.append(api_data["prompt"])
-                report_lines.append("```")
-                report_lines.append("")
-                
-                # Add response
-                report_lines.append("AI Response:")
-                report_lines.append("```")
-                report_lines.append(api_data["response"])
-                report_lines.append("```")
-                report_lines.append("")
-        
-        # Output the report
-        report = "\n".join(report_lines)
+        report = format_analysis_report(
+            total_files=len(data_files),
+            total_headers=len(all_headers),
+            analyzed_files=file_list_str,
+            headers_per_file=headers_per_file_str,
+            datetime_str=now
+        )
         if args.output:
             with open(args.output, 'w', encoding='utf-8') as f:
                 f.write(report)
@@ -480,6 +488,26 @@ async def async_main():
         )
         
         print(f"Extracted {record_count} records to {args.output}")
+
+        # Summarize lines written from each file into the output
+        try:
+            from collections import Counter
+            file_counts = Counter()
+            with open(args.output, 'r', encoding='utf-8') as f:
+                for line in f:
+                    try:
+                        obj = json.loads(line)
+                        src = obj.get('_source_file', 'UNKNOWN')
+                        file_counts[src] += 1
+                    except Exception:
+                        continue
+            print("\nLines written per source file:")
+            print("=" * 80)
+            for fname, count in file_counts.most_common():
+                print(f"  {fname}: {count}")
+        except Exception as e:
+            print(f"Warning: Could not summarize per-file line counts: {e}")
+
     
     # Handle the process command (analyze + extract)
     elif args.command == "process":
@@ -515,93 +543,41 @@ async def async_main():
         mapper.save_mappings(args.mappings_output)
         print(f"Field mappings saved to {args.mappings_output}")
         
+        # Prepare extra info for report
+        import datetime
+        now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        file_list = [os.path.basename(f) for f in data_files]
+        file_list_str = "\n  - ".join(file_list[:10])
+        if len(file_list) > 10:
+            file_list_str += f"\n  ... and {len(file_list) - 10} more files"
+        headers_per_file_lines = []
+        file_mappings = mapper.get_all_mappings()  # Dict[file_path, Dict[original_header, normalized_field]]
+        for file_path in data_files:
+            # Try to match mapping by full path, fallback to basename
+            mapping = file_mappings.get(file_path)
+            if mapping is None:
+                for k in file_mappings:
+                    if os.path.basename(k) == os.path.basename(file_path):
+                        mapping = file_mappings[k]
+                        break
+            count = len(mapping) if mapping else 0
+            headers_per_file_lines.append(f"{os.path.basename(file_path)}: {count} headers")
+        headers_per_file_str = "\n  - " + "\n  - ".join(headers_per_file_lines[:10])
+        if len(headers_per_file_lines) > 10:
+            headers_per_file_str += f"\n  ... and {len(headers_per_file_lines) - 10} more files"
         # Generate analysis report if requested
         if args.analysis_output:
-            report_lines = [
-                "Field Normalizer Analysis Report",
-                "=" * 80,
-                "",
-                f"Total files analyzed: {len(data_files)}",
-                f"Total unique headers found: {len(all_headers)}",
-                ""
-            ]
-            
-            # Add field groups to report
-            if not args.no_normalize:
-                field_groups = group_fields(all_headers)
-                report_lines.append(format_field_groups(field_groups, header_stats))
-            
-            # Add field variations to report
-            if not args.no_variations and not args.no_normalize:
-                field_variations = analyze_field_variations(all_headers, header_stats)
-                report_lines.append(format_field_variations(field_variations, header_stats))
-            
-            # Add mappings report
-            report_lines.append("")
-            report_lines.append(mappings_report)
-            
-            # Add AI analysis section if AI was used
-            if args.use_ai:
-                report_lines.append("")
-                report_lines.append("AI Analysis Details")
-                report_lines.append("=" * 80)
-                report_lines.append("")
-                
-                for file_name, api_data in mapper.api_responses.items():
-                    report_lines.append(f"File: {file_name}")
-                    report_lines.append("-" * (len(file_name) + 6))
-                    report_lines.append("")
-                    
-                    # Add headers
-                    report_lines.append("Headers:")
-                    report_lines.append("```")
-                    report_lines.append(", ".join(api_data["headers"]))
-                    report_lines.append("```")
-                    report_lines.append("")
-                    
-                    # Add sample data in native format
-                    report_lines.append(f"Sample Data ({api_data.get('sample_format', 'unknown').upper()}):")
-                    report_lines.append("```")
-                    if "sample_display" in api_data:
-                        report_lines.append(api_data["sample_display"])
-                    else:
-                        report_lines.append(json.dumps(api_data["sample_data"], indent=2))
-                    report_lines.append("```")
-                    report_lines.append("")
-                    
-                    # Add prompt
-                    report_lines.append("AI Prompt:")
-                    report_lines.append("```")
-                    report_lines.append(api_data["prompt"])
-                    report_lines.append("```")
-                    report_lines.append("")
-                    
-                    # Add response
-                    report_lines.append("AI Response:")
-                    report_lines.append("```")
-                    report_lines.append(api_data["response"])
-                    report_lines.append("```")
-                    report_lines.append("")
-                    
-                    # Add final mappings if available
-                    if file_name in [os.path.basename(path) for path in mapper.file_mappings]:
-                        file_path = next(path for path in mapper.file_mappings if os.path.basename(path) == file_name)
-                        file_mappings = mapper.file_mappings[file_path]
-                        
-                        report_lines.append("Final Mappings:")
-                        report_lines.append("```json")
-                        report_lines.append(json.dumps(file_mappings, indent=2))
-                        report_lines.append("```")
-                        report_lines.append("")
-                    
-                    report_lines.append("-" * 80)
-                    report_lines.append("")
-            
-            # Output the report
-            report = "\n".join(report_lines)
+            report = format_analysis_report(
+                total_files=len(data_files),
+                total_headers=len(all_headers),
+                analyzed_files=file_list_str,
+                headers_per_file=headers_per_file_str,
+                datetime_str=now
+            )
             with open(args.analysis_output, 'w', encoding='utf-8') as f:
                 f.write(report)
             print(f"Analysis report saved to {args.analysis_output}")
+
         
         # Extract data
         print(f"Extracting data from {len(data_files)} files...")
@@ -703,6 +679,36 @@ def format_field_variations(field_variations: Dict[str, Dict[str, Dict[str, List
     
     return "\n".join(lines)
 
+def format_analysis_report(
+    total_files: int,
+    total_headers: int,
+    analyzed_files: str = None,
+    headers_per_file: str = None,
+    datetime_str: str = None
+) -> str:
+    """
+    Unified formatting for field normalizer analysis report (with useful extra info).
+    """
+    lines = [
+        "Field Normalizer Analysis Report",
+        "=" * 80,
+        f"Analysis run at: {datetime_str}" if datetime_str else None,
+        "",
+        f"Total files analyzed: {total_files}",
+        f"Total unique headers found: {total_headers}",
+        ""
+    ]
+    if analyzed_files:
+        lines.append("Files analyzed:")
+        lines.append(f"  - {analyzed_files}")
+        lines.append("")
+    if headers_per_file:
+        lines.append("Unique headers per file:")
+        lines.append(f"{headers_per_file}")
+        lines.append("")
+    # Remove None entries
+    lines = [l for l in lines if l is not None]
+    return "\n".join(lines)
 
 def main():
     """Main entry point that runs the async main function."""
