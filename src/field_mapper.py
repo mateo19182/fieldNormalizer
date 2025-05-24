@@ -10,7 +10,7 @@ from typing import Dict, List, Set, Any, Optional
 from src.field_normalizer import get_field_type, normalize_field_name, FIELD_PATTERNS
 
 # Default target field categories
-DEFAULT_TARGET_FIELDS = ['firstname', 'lastname', 'email', 'phone', 'address', 'username']
+DEFAULT_TARGET_FIELDS = ['email', 'phone', 'firstName', 'middleName', 'lastName', 'address', 'city', 'state', 'zipCode', 'country']
 
 class FieldMapper:
     """
@@ -83,7 +83,6 @@ class FieldMapper:
         with open(output_file, 'w') as f:
             json.dump({
                 'target_fields': self.target_fields,
-                'field_patterns': self.field_patterns,
                 'mappings': self.file_mappings
             }, f, indent=2)
     

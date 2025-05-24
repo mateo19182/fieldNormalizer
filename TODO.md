@@ -1,5 +1,7 @@
 # Field Normalizer - Future Improvements
 
+define pipeline better
+
 - [ ] Add option to save AI mapping results for future reference
 - [ ] Add ability to specify field types and validation rules for target fields
 - [ ] Improve memory efficiency for very large files

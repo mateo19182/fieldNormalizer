@@ -31,7 +31,7 @@ OPENROUTER_API_KEY=your_api_key_here
 
 ## Usage
 
-The tool offers three command options for flexibility:
+The tool offers four command options for flexibility:
 
 ### Option 1: Two-Step Workflow (Analyze then Extract)
 
@@ -63,7 +63,21 @@ field-normalizer extract [OPTIONS]
 - `--group-by-email` - Group records by email address (disabled by default)
 - `--use-ai` - Use AI-based field mappings (requires OPENROUTER_API_KEY in .env file)
 
-### Option 2: One-Step Workflow (Process)
+### Option 2: Validate Command (AI-Based Mapping Validation)
+
+```bash
+field-normalizer validate [OPTIONS]
+```
+
+The validate command uses AI to review and correct existing field mappings for accuracy and logical consistency.
+
+#### Validate Command Options
+- `--mappings` - Input mappings file to validate (default: mappings.json)
+- `--output, -o` - Output file for corrected mappings (default: corrected_mappings.json)
+- `--target-fields` - Custom target fields to validate against (default: name, email, phone, address)
+- `--data-description` - Description of the data you are looking for (helps AI validate mappings)
+
+### Option 3: One-Step Workflow (Process)
 
 ```bash
 field-normalizer process [OPTIONS] PATHS...
@@ -126,6 +140,24 @@ field-normalizer extract --mappings custom_mappings.json
 field-normalizer extract --use-ai
 ```
 
+#### Validate Command (AI-Based Mapping Validation)
+```bash
+# Validate and correct mappings using default settings
+field-normalizer validate
+
+# Validate a specific mappings file and save corrected version
+field-normalizer validate --mappings my_mappings.json --output corrected_mappings.json
+
+# Validate mappings against custom target fields
+field-normalizer validate --target-fields name email phone address company department
+
+# Validate with data description to improve context understanding
+field-normalizer validate --data-description "Customer contact information from sales database"
+
+# Full validation with all custom options
+field-normalizer validate --mappings old_mappings.json --output new_mappings.json --target-fields name email phone company title --data-description "Employee contact and job information"
+```
+
 #### One-Step Workflow
 ```bash
 # Process all files in one step (analyze and extract)
@@ -172,6 +204,29 @@ To use AI-based mapping, you must provide an OpenRouter API key in a `.env` file
 ```bash
 OPENROUTER_API_KEY=your_api_key_here
 ```
+
+### 3. AI-Based Mapping Validation
+
+The validate command provides an additional layer of quality assurance for existing field mappings. It uses AI to review, validate, and correct mappings to ensure they are logically consistent and accurate.
+
+- **Pros**: Improves mapping accuracy, catches logical errors, provides detailed feedback
+- **Cons**: Requires an API key, may incur costs, requires internet connection
+
+The AI validation process analyzes:
+1. **Logical consistency** - Ensures source field names logically map to their assigned target fields
+2. **Target field compliance** - Verifies all mappings use only the specified target fields
+3. **Semantic accuracy** - Detects obvious mismatches (e.g., email fields mapped to "name")
+4. **Data context** - Uses your data description to improve validation accuracy
+
+The validation process produces:
+- **Corrected mappings file** - A new mappings file with AI-suggested corrections
+- **Changes summary** - A clear diff showing what was added, removed, and changed
+
+This is particularly useful for:
+- **Quality control** - Ensuring mappings are accurate before data extraction
+- **Large-scale projects** - Validating hundreds of file mappings efficiently  
+- **Complex domains** - Handling specialized terminology or unusual field names
+- **Quick review** - Easily see what the AI changed with a clear diff format
 
 ## Custom Target Fields
 

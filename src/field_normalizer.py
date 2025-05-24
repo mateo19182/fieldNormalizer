@@ -16,7 +16,7 @@ FIELD_PATTERNS = {
         r'email.?contact',
         r'^e.?mail$',
         r'mail',
-        r'^e$',
+        r"^email$"   
     ],
     'phone': [
         r'phone',
@@ -42,114 +42,117 @@ FIELD_PATTERNS = {
         r'contact.?telephone',
         r'contact.?mobile',
     ],
-    'firstname': [
+    'firstName': [
         r'^name$',
         r'^nome$',
         r'first.?name',
         r'firstname',
         r'display.?name',
-        r'full.?name',
-        r'nombre',
         r'given.?name',
         r'givenname',
         r'first',
         r'first.?name',
+        r'forename',
+        r'nombre',
+        r'vorname',
+        r"nome$",
+        r"^(?!cognome$)"
     ],
-    'lastname': [
+    'middleName': [
+        r'middle.?name',
+        r'middlename',
+        r'middle.?initial',
+        r'middle',
+        r'mid.?name',
+        r'segundo.?nombre',
+        r'middle.?part',
+    ],
+    'lastName': [
         r'cognome',
         r'last.?name',
         r'lastname',
         r'surname',
         r'apellido',
+        r'family.?name',
+        r'nachname',
+        r'last',
+        r'surname',
+        r'cognome',
+        r"secondName"
+    ],
+    'address': [
+        r'address',
+        r'indirizzo',
+        r'street.?address',
+        r'mailing.?address',
+        r'postal.?address',
+        r'residence.?address',
+        r'home.?address',
+        r'physical.?address',
+        r'address.?line',
+        r'direccion',
+        r'adresse',
+        r"via ", 
+        r"via"
+    ],
+    'city': [
+        r'city',
+        r'town',
+        r'città',
+        r'citta',
+        r'locality',
+        r'settlement',
+        r'urban.?area',
+        r'municipality',
+        r'ciudad',
+        r'stadt',
+        r'village',
+    ],
+    'state': [
+        r'state',
+        r'province',
+        r'region',
+        r'territorio',
+        r'provincia',
+        r'regione',
+        r'county',
+        r'department',
+        r'prefecture',
+        r'estado',
+        r'bundesland',
+    ],
+    'zipCode': [
+        r'zip',
+        r'zip.?code',
+        r'postal.?code',
+        r'post.?code',
+        r'cap',
+        r'codice.?postale',
+        r'codigo.?postal',
+        r'postleitzahl',
+        r'plz',
+        r'pin.?code',
+    ],
+    'country': [
+        r'country',
+        r'nation',
+        r'paese',
+        r'nazione',
+        r'land',
+        r'pais',
+        r'country.?name',
+        r'country.?code',
+        r'nationality',
     ],
     'username': [
         r'^user.?name$',
         r'^username$',
-    ],
-    'address': [
-        # General address patterns
-        r'address',
-        r'indirizzo',
-        r'street',
-        r'via',
-        r'strada',
-        r'road',
-        r'avenue',
-        r'viale',
-        r'corso',
-        r'piazza',
-        r'piazzale',
-        
-        # Address components
-        r'street.?address',
-        r'street.?name',
-        r'street.?number',
-        r'building',
-        r'edificio',
-        r'civico',
-        r'civic',
-        r'number',
-        r'numero',
-        
-        # City/town
-        r'city',
-        r'città',
-        r'citta',
-        r'town',
-        r'paese',
-        r'località',
-        r'localita',
-        
-        # Region/State/Province
-        r'region',
-        r'regione',
-        r'state',
-        r'stato',
-        r'province',
-        r'provincia',
-        r'county',
-        r'contea',
-        
-        # Postal/Zip code
-        r'zip',
-        r'zip.?code',
-        r'postal',
-        r'postal.?code',
-        r'cap',
-        r'codice.?postale',
-        r'posta',
-        
-        # Country
-        r'country',
-        r'paese',
-        r'nazione',
-        
-        # Special address types
-        r'shipping',
-        r'billing',
-        r'delivery',
-        r'spedizione',
-        r'fatturazione',
-        r'fattura',
-        r'residenza',
-        r'residence',
-        
-        # Compound patterns
-        r'street',
-        r'address.?line',
-        r'indirizzo',
-        r'via',
-        r'strada',
-        r'civico',
-        
-        # Additional international patterns
-        r'p\.?o\.?\s*box',
-        r'post\s*office\s*box',
-        r'apt',
-        r'apartment',
-        r'appartamento',
-        r'floor',
-        r'piano'
+        r'user.?id',
+        r'login.?name',
+        r'login.?id',
+        r'account.?name',
+        r'screen.?name',
+        r'handle',
     ]
 }
 
@@ -201,15 +204,9 @@ def group_fields(headers: List[str]) -> Dict[str, Set[str]]:
     Returns:
         Dictionary mapping field types to sets of field names
     """
-    field_groups = {
-        'email': set(),
-        'phone': set(),
-        'firstname': set(),
-        'lastname': set(),
-        'username': set(),
-        'address': set(),
-        'other': set()
-    }
+    # Initialize field groups with the same keys as FIELD_PATTERNS plus 'other'
+    field_groups = {field_type: set() for field_type in FIELD_PATTERNS.keys()}
+    field_groups['other'] = set()  # Add 'other' category
     
     for header in headers:
         field_type = get_field_type(header)
@@ -235,7 +232,7 @@ def validate_field_value(field_type: str, value: str) -> Any:
     value = value.strip()
     
     # Discard names with more than 50 characters
-    if field_type == 'firstname' and len(value) > 50:
+    if field_type == 'firstname' and len(value) > 500:
         return None
         
     # Discard phone numbers that contain alphabetic characters (words)

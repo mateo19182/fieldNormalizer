@@ -9,7 +9,7 @@ import sys
 from typing import Dict, List, Set, Any, Iterator, Optional, Tuple
 from tqdm import tqdm
 import concurrent.futures
-from src.field_mapper import FieldMapper
+from src.field_mapper import FieldMapper, DEFAULT_TARGET_FIELDS
 from src.field_normalizer import validate_field_value
 from src.extractors import find_header_row
 
@@ -115,7 +115,7 @@ def extract_data_from_csv(file_path: str, field_mapping: Dict[str, List[str]], i
                     if col_idx < len(row):
                         value = row[col_idx].strip()
                         
-                        # Skip NULL values
+                        # Skip NULL values for this field, but continue processing the record
                         if not value or value.upper() in ('NULL', 'N/A', 'NONE', ''):
                             continue
                         
@@ -361,12 +361,16 @@ def _process_json_object(obj: Dict[str, Any], field_mapping: Dict[str, List[str]
             if header in obj:
                 value = obj[header]
                 
+                # Skip empty containers (lists, dicts, etc.) and null values
+                if value is None or (hasattr(value, '__len__') and len(value) == 0):
+                    continue
+                
                 # Convert non-string values to strings
                 if not isinstance(value, str):
                     value = str(value)
                 
                 # Skip NULL values
-                if not value or value.upper() in ('NULL', 'N/A', 'NONE', ''):
+                if not value or value.upper() in ('NULL', 'N/A', 'NONE', '', "<blank>", "<BLANK>", "null"):
                     continue
                 
                 # Validate field value based on field type
@@ -424,22 +428,52 @@ def extract_all_data(file_paths: List[str], field_mapper: Any) -> Iterator[Dict[
     Yields:
         Dictionaries containing extracted data with normalized field names
     """
+    # Get all mappings
+    all_mappings = field_mapper.get_all_mappings()
+    
     # Track files with only one mapping (these are often not useful)
     single_mapping_files = []
     files_to_process = []
     
-    # First identify which files to process
+    # Process files with mappings
     for file_path in file_paths:
-        # Get inverse mapping for this file (field type -> list of original headers)
-        inverse_mapping = field_mapper.get_inverse_mapping(file_path)
+        # Check if we have mappings for this file
+        basename = os.path.basename(file_path)
+        found_mapping = False
         
-        # Skip files with only one mapping (these are often not useful)
-        total_mappings = sum(len(headers) for headers in inverse_mapping.values())
-        if total_mappings <= 1:
-            single_mapping_files.append(file_path)
-            continue
+        # Try direct path match
+        if file_path in all_mappings:
+            inverse_mapping = field_mapper.get_inverse_mapping(file_path)
+            files_to_process.append((file_path, inverse_mapping))
+            found_mapping = True
         
-        files_to_process.append((file_path, inverse_mapping))
+        # Try basename match
+        elif basename in all_mappings:
+            inverse_mapping = field_mapper.get_inverse_mapping(basename)
+            files_to_process.append((file_path, inverse_mapping))
+            found_mapping = True
+        
+        # Try with relative paths that might be in the mappings
+        else:
+            for mapping_path in all_mappings.keys():
+                if mapping_path.endswith('/' + basename) or mapping_path.endswith('\\' + basename):
+                    inverse_mapping = field_mapper.get_inverse_mapping(mapping_path)
+                    files_to_process.append((file_path, inverse_mapping))
+                    found_mapping = True
+                    break
+        
+        # If no mapping found, check if it has only one mapping (often not useful)
+        if not found_mapping:
+            try:
+                inverse_mapping = field_mapper.get_inverse_mapping(file_path)
+                total_mappings = sum(len(headers) for headers in inverse_mapping.values())
+                if total_mappings <= 1:
+                    single_mapping_files.append(file_path)
+                else:
+                    files_to_process.append((file_path, inverse_mapping))
+            except:
+                # No mapping found at all
+                print(f"Warning: No mapping found for {file_path}", file=sys.stderr)
     
     # Process files sequentially to avoid memory/resource issues with large files
     for file_path, inverse_mapping in tqdm(files_to_process, desc="Processing files", unit="file"):
@@ -593,6 +627,54 @@ def deduplicate_records(records: Iterator[Dict[str, Any]]) -> Iterator[Dict[str,
             seen_records.add(record_key)
             yield record
 
+def standardize_record_format(record: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Standardize record format to ensure consistent field order and list values.
+    Excludes empty fields from the output.
+    
+    Args:
+        record: Dictionary containing record data
+        
+    Returns:
+        Standardized record with consistent field order and all values as lists,
+        with empty fields excluded
+    """
+    # Use the standard field order from DEFAULT_TARGET_FIELDS
+    standard_fields = DEFAULT_TARGET_FIELDS
+    
+    # Create a new record with standardized format
+    standardized = {}
+    
+    # Process each field in the standard order
+    for field in standard_fields:
+        # Convert camelCase to lowercase for backward compatibility
+        legacy_field = field.lower()
+        
+        # Check if the field exists in either format
+        if field in record:
+            value = record[field]
+        elif legacy_field in record:
+            value = record[legacy_field]
+        else:
+            # Field doesn't exist in this record - skip it entirely
+            continue
+        
+        # Ensure value is a list
+        if not isinstance(value, list):
+            value = [value]
+        
+        # Only add non-empty values
+        if value:  # This checks if the list is not empty
+            standardized[field] = value
+    
+    # Add any additional fields not in the standard list (like _source_file)
+    for field, value in record.items():
+        if field not in standard_fields and field.lower() not in standard_fields and field not in standardized:
+            # For non-standard fields, keep them as is (don't filter empty values)
+            standardized[field] = value
+    
+    return standardized
+
 def process_batch(batch: List[Dict[str, Any]], group_by_email: bool, batch_num: int) -> List[Dict[str, Any]]:
     """
     Process a batch of records with optional email grouping and deduplication.
@@ -610,11 +692,15 @@ def process_batch(batch: List[Dict[str, Any]], group_by_email: bool, batch_num: 
         batch = list(merge_records_by_email(batch))
     
     # Deduplicate records
-    return list(deduplicate_records(batch))
+    deduplicated = list(deduplicate_records(batch))
+    
+    # Standardize record format
+    return [standardize_record_format(record) for record in deduplicated]
 
 def write_jsonl(records: Iterator[Dict[str, Any]], output_path: str, batch_size: int = 1000, group_by_email: bool = False) -> int:
     """
-    Write records to a JSONL file using optimized batch processing.
+    Write records to a JSONL file using optimized batch processing with true cross-batch deduplication.
+    Uses a two-pass approach to ensure complete deduplication without excessive memory usage.
     
     Args:
         records: Iterator of record dictionaries
@@ -625,35 +711,86 @@ def write_jsonl(records: Iterator[Dict[str, Any]], output_path: str, batch_size:
     Returns:
         Total number of records written
     """
-    # Process in batches to avoid loading everything into memory
-    total_records = 0
-    batch_records = []
-    batch_count = 0
+    import tempfile
+    import os
+    import json
     
-    # Create the output file
-    with open(output_path, 'w', encoding='utf-8') as f:
-        # Process the records in batches
-        for record in tqdm(records, desc="Processing records", unit="record"):
-            batch_records.append(record)
+    # Create a temporary directory for our intermediate files
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # First pass: Process records in batches and write to temp file with hashes
+        temp_file_path = os.path.join(temp_dir, "records_with_hashes.jsonl")
+        
+        print("Pass 1: Processing records and generating hashes...")
+        total_processed = 0
+        batch_records = []
+        batch_count = 0
+        
+        with open(temp_file_path, 'w', encoding='utf-8') as temp_f:
+            # Process the records in batches
+            for record in tqdm(records, desc="Processing records (pass 1)", unit="record"):
+                batch_records.append(record)
+                
+                # Process when we reach the batch size
+                if len(batch_records) >= batch_size:
+                    batch_count += 1
+                    # Process this batch (deduplicates within batch)
+                    processed_batch = process_batch(batch_records, group_by_email, batch_count)
+                    
+                    # Generate hash for each record and write to temp file
+                    for r in processed_batch:
+                        # Create a hash key for the record (same logic as in deduplicate_records)
+                        record_no_source = {k: v for k, v in r.items() if k != '_source_file'}
+                        try:
+                            record_hash = json.dumps(record_no_source, sort_keys=True, separators=(',', ':'))
+                        except TypeError:
+                            record_hash = json.dumps({k: str(v) for k, v in record_no_source.items()}, sort_keys=True, separators=(',', ':'))
+                        
+                        # Write record with its hash
+                        temp_f.write(json.dumps({"hash": record_hash, "record": r}) + '\n')
+                    
+                    total_processed += len(processed_batch)
+                    batch_records = []
             
-            # Process when we reach the batch size
-            if len(batch_records) >= batch_size:
+            # Process any remaining records
+            if batch_records:
                 batch_count += 1
-                # Process this batch
                 processed_batch = process_batch(batch_records, group_by_email, batch_count)
                 
-                # Write the batch
-                f.write('\n'.join(json.dumps(r) for r in processed_batch) + '\n')
+                for r in processed_batch:
+                    # Create a hash key for the record
+                    record_no_source = {k: v for k, v in r.items() if k != '_source_file'}
+                    try:
+                        record_hash = json.dumps(record_no_source, sort_keys=True, separators=(',', ':'))
+                    except TypeError:
+                        record_hash = json.dumps({k: str(v) for k, v in record_no_source.items()}, sort_keys=True, separators=(',', ':'))
+                    
+                    # Write record with its hash
+                    temp_f.write(json.dumps({"hash": record_hash, "record": r}) + '\n')
                 
-                # Update count and reset batch
-                total_records += len(processed_batch)
-                batch_records = []
+                total_processed += len(processed_batch)
         
-        # Process any remaining records
-        if batch_records:
-            batch_count += 1
-            processed_batch = process_batch(batch_records, group_by_email, batch_count)
-            f.write('\n'.join(json.dumps(r) for r in processed_batch) + '\n')
-            total_records += len(processed_batch)
+        # Second pass: Read the temp file and deduplicate across all batches
+        print(f"Pass 1 complete: Processed {total_processed} records")
+        print("Pass 2: Deduplicating across all batches...")
+        
+        seen_hashes = set()
+        total_records = 0
+        
+        with open(temp_file_path, 'r', encoding='utf-8') as temp_f, \
+             open(output_path, 'w', encoding='utf-8') as out_f:
+            
+            for line in tqdm(temp_f, desc="Deduplicating (pass 2)", unit="record"):
+                data = json.loads(line)
+                record_hash = data["hash"]
+                record = data["record"]
+                
+                # Only write if we haven't seen this hash before
+                if record_hash not in seen_hashes:
+                    seen_hashes.add(record_hash)
+                    # Write record with source file (if present)
+                    record_array = [record.get(field, []) for field in DEFAULT_TARGET_FIELDS] + [record['_source_file']]
+                    out_f.write(json.dumps(record_array) + '\n')
+                    total_records += 1
     
+    print(f"Deduplication complete: {total_processed} records processed, {total_records} unique records written")
     return total_records

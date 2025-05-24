@@ -11,11 +11,13 @@ import asyncio
 import concurrent.futures
 from typing import Dict, List, Set, Tuple, Any
 from tqdm import tqdm
+import time
 
 from src.extractors import extract_headers_from_file
 from src.field_normalizer import analyze_field_variations, group_fields
 from src.field_mapper import create_field_mappings, format_mappings_report, DEFAULT_TARGET_FIELDS, FieldMapper
 from src.ai_field_mapper import create_ai_field_mappings, format_ai_mappings_report, AIFieldMapper
+from src.ai_mapping_validator import validate_mappings_with_ai, format_changes_diff, AIMappingValidator
 from src.data_extractor import extract_all_data, write_jsonl
 
 
@@ -142,7 +144,33 @@ def parse_args():
         help="Use AI-based field mappings (requires OPENROUTER_API_KEY in .env file)",
     )
     
-    # 3. Process command - combines analyze and extract in one step
+    # 3. Validate command - for validating and correcting existing mappings using AI
+    validate_parser = subparsers.add_parser(
+        "validate",
+        help="Validate and correct existing field mappings using AI"
+    )
+    validate_parser.add_argument(
+        "--mappings",
+        default="mappings.json",
+        help="Input mappings file to validate (JSON format, default: mappings.json)",
+    )
+    validate_parser.add_argument(
+        "--output",
+        "-o",
+        default="corrected_mappings.json",
+        help="Output file for corrected mappings (default: corrected_mappings.json)",
+    )
+    validate_parser.add_argument(
+        "--target-fields",
+        nargs="+",
+        help=f"Custom target fields to validate against (default: {', '.join(DEFAULT_TARGET_FIELDS)})",
+    )
+    validate_parser.add_argument(
+        "--data-description",
+        help="Description of the data you are looking for (helps AI validate mappings)",
+    )
+    
+    # 4. Process command - combines analyze and extract in one step
     process_parser = subparsers.add_parser(
         "process",
         help="Analyze files and extract data in one step"
@@ -360,7 +388,7 @@ async def async_main():
     args = parse_args()
     
     if not args.command:
-        print("Error: No command specified. Use 'analyze', 'extract', or 'process'.", file=sys.stderr)
+        print("Error: No command specified. Use 'analyze', 'extract', 'validate', or 'process'.", file=sys.stderr)
         sys.exit(1)
     
     # Load configuration if specified
@@ -370,6 +398,8 @@ async def async_main():
     
     # Handle the analyze command
     if args.command == "analyze":
+        start_time = time.time()
+        
         # Find data files
         data_files = find_data_files(args.paths, args.file_types, args.max_files)
         if not data_files:
@@ -410,41 +440,42 @@ async def async_main():
         mapper.save_mappings(args.mappings_output)
         print(f"Field mappings saved to {args.mappings_output}")
         
+        # Calculate processing time
+        processing_time = time.time() - start_time
+        
         # Prepare extra info for report
         import datetime
         now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        file_list = [os.path.basename(f) for f in data_files]
-        file_list_str = "\n  - ".join(file_list[:10])
-        if len(file_list) > 10:
-            file_list_str += f"\n  ... and {len(file_list) - 10} more files"
-        # Build headers_per_file_str using finalized mappings
+        
+        # Build analyzed_files_str with field counts
         file_mappings = mapper.get_all_mappings()
-        headers_per_file_lines = []
+        analyzed_files_lines = []
         for file_path in data_files:
+            # Try to match mapping by full path, fallback to basename
             mapping = file_mappings.get(file_path)
             if mapping is None:
                 for k in file_mappings:
                     if os.path.basename(k) == os.path.basename(file_path):
                         mapping = file_mappings[k]
                         break
-            mapped_count = len(mapping) if mapping else 0
+            count = len(mapping) if mapping else 0
             # Find total headers for this file from file_metadata
             total_headers = 0
             for meta in file_metadata:
                 if meta.get('path') == file_path or os.path.basename(meta.get('path', '')) == os.path.basename(file_path):
                     total_headers = len(meta.get('headers', []))
                     break
-            headers_per_file_lines.append(f"{os.path.basename(file_path)}: {mapped_count}/{total_headers} headers")
-        headers_per_file_str = "\n  - " + "\n  - ".join(headers_per_file_lines[:10])
-        if len(headers_per_file_lines) > 10:
-            headers_per_file_str += f"\n  ... and {len(headers_per_file_lines) - 10} more files"
+            analyzed_files_lines.append(f"{os.path.basename(file_path)}: {count}/{total_headers} fields")
+        
+        analyzed_files_str = "\n  - ".join(analyzed_files_lines)
+        
         # Generate analysis report
         report = format_analysis_report(
             total_files=len(data_files),
             total_headers=len(all_headers),
-            analyzed_files=file_list_str,
-            headers_per_file=headers_per_file_str,
-            datetime_str=now
+            analyzed_files=analyzed_files_str,
+            datetime_str=now,
+            processing_time=processing_time
         )
         if args.output:
             with open(args.output, 'w', encoding='utf-8') as f:
@@ -508,9 +539,59 @@ async def async_main():
         except Exception as e:
             print(f"Warning: Could not summarize per-file line counts: {e}")
 
+    # Handle the validate command
+    elif args.command == "validate":
+        # Check if mappings file exists
+        if not os.path.isfile(args.mappings):
+            print(f"Error: Mappings file '{args.mappings}' not found.", file=sys.stderr)
+            sys.exit(1)
+        
+        # Get target fields and data description from config or command line
+        target_fields = args.target_fields or config.get('target_fields') or DEFAULT_TARGET_FIELDS
+        data_description = args.data_description or config.get('data_description', "")
+        
+        print(f"Validating mappings in {args.mappings}")
+        print(f"Target fields: {', '.join(target_fields)}")
+        if data_description:
+            print(f"Data description: \"{data_description}\"")
+        
+        # Validate and correct mappings using AI
+        try:
+            validator = await validate_mappings_with_ai(args.mappings, target_fields, data_description)
+            
+            # Save debug log
+            validator.save_debug_log("validation_debug.log")
+            print("Debug log saved to validation_debug.log")
+            
+            # Save corrected mappings
+            validator.save_corrected_mappings(args.output)
+            print(f"Corrected mappings saved to {args.output}")
+            
+            # Print brief summary instead of detailed diff
+            changes = validator.get_changes_diff()
+            if not changes:
+                print("\nNo changes were made to the mappings.")
+            else:
+                total_files = len(changes)
+                total_added = sum(len(f["added"]) for f in changes)
+                total_removed = sum(len(f["removed"]) for f in changes)
+                total_changed = sum(len(f["changed"]) for f in changes)
+                
+                print(f"\nValidation completed:")
+                print(f"  Files with changes: {total_files}")
+                print(f"  Mappings added: {total_added}")
+                print(f"  Mappings removed: {total_removed}")
+                print(f"  Mappings changed: {total_changed}")
+                print(f"\nDetailed changes are available in validation_debug.log")
+            
+        except Exception as e:
+            print(f"Error during validation: {str(e)}", file=sys.stderr)
+            sys.exit(1)
     
     # Handle the process command (analyze + extract)
     elif args.command == "process":
+        start_time = time.time()
+        
         # Find data files
         data_files = find_data_files(args.paths, args.file_types, args.max_files)
         if not data_files:
@@ -543,15 +624,16 @@ async def async_main():
         mapper.save_mappings(args.mappings_output)
         print(f"Field mappings saved to {args.mappings_output}")
         
+        # Calculate processing time up to this point
+        analysis_time = time.time() - start_time
+        
         # Prepare extra info for report
         import datetime
         now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        file_list = [os.path.basename(f) for f in data_files]
-        file_list_str = "\n  - ".join(file_list[:10])
-        if len(file_list) > 10:
-            file_list_str += f"\n  ... and {len(file_list) - 10} more files"
-        headers_per_file_lines = []
+        
+        # Build analyzed_files_str with field counts
         file_mappings = mapper.get_all_mappings()  # Dict[file_path, Dict[original_header, normalized_field]]
+        analyzed_files_lines = []
         for file_path in data_files:
             # Try to match mapping by full path, fallback to basename
             mapping = file_mappings.get(file_path)
@@ -561,18 +643,23 @@ async def async_main():
                         mapping = file_mappings[k]
                         break
             count = len(mapping) if mapping else 0
-            headers_per_file_lines.append(f"{os.path.basename(file_path)}: {count} headers")
-        headers_per_file_str = "\n  - " + "\n  - ".join(headers_per_file_lines[:10])
-        if len(headers_per_file_lines) > 10:
-            headers_per_file_str += f"\n  ... and {len(headers_per_file_lines) - 10} more files"
-        # Generate analysis report if requested
+            # Find total headers for this file from file_metadata
+            total_headers = 0
+            for meta in file_metadata:
+                if meta.get('path') == file_path or os.path.basename(meta.get('path', '')) == os.path.basename(file_path):
+                    total_headers = len(meta.get('headers', []))
+                    break
+            analyzed_files_lines.append(f"{os.path.basename(file_path)}: {count}/{total_headers} fields")
+        
+        analyzed_files_str = "\n  - ".join(analyzed_files_lines)
+        
         if args.analysis_output:
             report = format_analysis_report(
                 total_files=len(data_files),
                 total_headers=len(all_headers),
-                analyzed_files=file_list_str,
-                headers_per_file=headers_per_file_str,
-                datetime_str=now
+                analyzed_files=analyzed_files_str,
+                datetime_str=now,
+                processing_time=analysis_time
             )
             with open(args.analysis_output, 'w', encoding='utf-8') as f:
                 f.write(report)
@@ -683,8 +770,8 @@ def format_analysis_report(
     total_files: int,
     total_headers: int,
     analyzed_files: str = None,
-    headers_per_file: str = None,
-    datetime_str: str = None
+    datetime_str: str = None,
+    processing_time: float = None
 ) -> str:
     """
     Unified formatting for field normalizer analysis report (with useful extra info).
@@ -693,6 +780,7 @@ def format_analysis_report(
         "Field Normalizer Analysis Report",
         "=" * 80,
         f"Analysis run at: {datetime_str}" if datetime_str else None,
+        f"Processing time: {processing_time:.2f} seconds" if processing_time else None,
         "",
         f"Total files analyzed: {total_files}",
         f"Total unique headers found: {total_headers}",
@@ -701,10 +789,6 @@ def format_analysis_report(
     if analyzed_files:
         lines.append("Files analyzed:")
         lines.append(f"  - {analyzed_files}")
-        lines.append("")
-    if headers_per_file:
-        lines.append("Unique headers per file:")
-        lines.append(f"{headers_per_file}")
         lines.append("")
     # Remove None entries
     lines = [l for l in lines if l is not None]
