@@ -697,7 +697,7 @@ def process_batch(batch: List[Dict[str, Any]], group_by_email: bool, batch_num: 
     # Standardize record format
     return [standardize_record_format(record) for record in deduplicated]
 
-def write_jsonl(records: Iterator[Dict[str, Any]], output_path: str, batch_size: int = 1000, group_by_email: bool = False) -> int:
+def write_jsonl(records: Iterator[Dict[str, Any]], output_path: str, batch_size: int = 1000, group_by_email: bool = False, include_source: bool = True) -> int:
     """
     Write records to a JSONL file using optimized batch processing with true cross-batch deduplication.
     Uses a two-pass approach to ensure complete deduplication without excessive memory usage.
@@ -707,6 +707,7 @@ def write_jsonl(records: Iterator[Dict[str, Any]], output_path: str, batch_size:
         output_path: Path to output JSONL file
         batch_size: Number of records to write in each batch
         group_by_email: Whether to group records by email
+        include_source: Whether to include source file information in output
         
     Returns:
         Total number of records written
@@ -787,10 +788,260 @@ def write_jsonl(records: Iterator[Dict[str, Any]], output_path: str, batch_size:
                 # Only write if we haven't seen this hash before
                 if record_hash not in seen_hashes:
                     seen_hashes.add(record_hash)
-                    # Write record with source file (if present)
-                    record_array = [record.get(field, []) for field in DEFAULT_TARGET_FIELDS] + [record['_source_file']]
+                    # Write record with or without source file based on include_source flag
+                    record_array = [record.get(field, []) for field in DEFAULT_TARGET_FIELDS]
+                    if include_source:
+                        record_array.append(record.get('_source_file', ''))
                     out_f.write(json.dumps(record_array) + '\n')
                     total_records += 1
     
     print(f"Deduplication complete: {total_processed} records processed, {total_records} unique records written")
     return total_records
+
+def write_csv(records: Iterator[Dict[str, Any]], output_path: str, batch_size: int = 1000, group_by_email: bool = False, include_source: bool = True) -> int:
+    """
+    Write records to a CSV file using optimized batch processing with deduplication.
+    
+    Args:
+        records: Iterator of record dictionaries
+        output_path: Path to output CSV file
+        batch_size: Number of records to process in each batch
+        group_by_email: Whether to group records by email
+        include_source: Whether to include source file information in output
+        
+    Returns:
+        Total number of records written
+    """
+    import tempfile
+    import os
+    import json
+    
+    # Create a temporary directory for our intermediate files
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # First pass: Process records in batches and write to temp file with hashes
+        temp_file_path = os.path.join(temp_dir, "records_with_hashes.jsonl")
+        
+        print("Pass 1: Processing records and generating hashes...")
+        total_processed = 0
+        batch_records = []
+        batch_count = 0
+        
+        with open(temp_file_path, 'w', encoding='utf-8') as temp_f:
+            # Process the records in batches
+            for record in tqdm(records, desc="Processing records (pass 1)", unit="record"):
+                batch_records.append(record)
+                
+                # Process when we reach the batch size
+                if len(batch_records) >= batch_size:
+                    batch_count += 1
+                    # Process this batch (deduplicates within batch)
+                    processed_batch = process_batch(batch_records, group_by_email, batch_count)
+                    
+                    # Generate hash for each record and write to temp file
+                    for r in processed_batch:
+                        # Create a hash key for the record (same logic as in deduplicate_records)
+                        record_no_source = {k: v for k, v in r.items() if k != '_source_file'}
+                        try:
+                            record_hash = json.dumps(record_no_source, sort_keys=True, separators=(',', ':'))
+                        except TypeError:
+                            record_hash = json.dumps({k: str(v) for k, v in record_no_source.items()}, sort_keys=True, separators=(',', ':'))
+                        
+                        # Write record with its hash
+                        temp_f.write(json.dumps({"hash": record_hash, "record": r}) + '\n')
+                    
+                    total_processed += len(processed_batch)
+                    batch_records = []
+            
+            # Process any remaining records
+            if batch_records:
+                batch_count += 1
+                processed_batch = process_batch(batch_records, group_by_email, batch_count)
+                
+                for r in processed_batch:
+                    # Create a hash key for the record
+                    record_no_source = {k: v for k, v in r.items() if k != '_source_file'}
+                    try:
+                        record_hash = json.dumps(record_no_source, sort_keys=True, separators=(',', ':'))
+                    except TypeError:
+                        record_hash = json.dumps({k: str(v) for k, v in record_no_source.items()}, sort_keys=True, separators=(',', ':'))
+                    
+                    # Write record with its hash
+                    temp_f.write(json.dumps({"hash": record_hash, "record": r}) + '\n')
+                
+                total_processed += len(processed_batch)
+        
+        # Second pass: Read the temp file and deduplicate across all batches, write to CSV
+        print(f"Pass 1 complete: Processed {total_processed} records")
+        print("Pass 2: Deduplicating and writing to CSV...")
+        
+        seen_hashes = set()
+        total_records = 0
+        
+        # Prepare CSV headers
+        csv_headers = list(DEFAULT_TARGET_FIELDS)
+        if include_source:
+            csv_headers.append('_source_file')
+        
+        with open(temp_file_path, 'r', encoding='utf-8') as temp_f, \
+             open(output_path, 'w', encoding='utf-8', newline='') as out_f:
+            
+            writer = csv.writer(out_f)
+            # Write header row
+            writer.writerow(csv_headers)
+            
+            for line in tqdm(temp_f, desc="Deduplicating and writing CSV (pass 2)", unit="record"):
+                data = json.loads(line)
+                record_hash = data["hash"]
+                record = data["record"]
+                
+                # Only write if we haven't seen this hash before
+                if record_hash not in seen_hashes:
+                    seen_hashes.add(record_hash)
+                    
+                    # Convert record to CSV row
+                    csv_row = []
+                    for field in DEFAULT_TARGET_FIELDS:
+                        value = record.get(field, [])
+                        if isinstance(value, list):
+                            # Join list values with semicolon
+                            csv_row.append('; '.join(str(v) for v in value) if value else '')
+                        else:
+                            csv_row.append(str(value) if value else '')
+                    
+                    # Add source file if requested
+                    if include_source:
+                        csv_row.append(record.get('_source_file', ''))
+                    
+                    writer.writerow(csv_row)
+                    total_records += 1
+    
+    print(f"Deduplication complete: {total_processed} records processed, {total_records} unique records written to CSV")
+    return total_records
+
+def write_json(records: Iterator[Dict[str, Any]], output_path: str, batch_size: int = 1000, group_by_email: bool = False, include_source: bool = True) -> int:
+    """
+    Write records to a JSON file using optimized batch processing with deduplication.
+    
+    Args:
+        records: Iterator of record dictionaries
+        output_path: Path to output JSON file
+        batch_size: Number of records to process in each batch
+        group_by_email: Whether to group records by email
+        include_source: Whether to include source file information in output
+        
+    Returns:
+        Total number of records written
+    """
+    import tempfile
+    import os
+    import json
+    
+    # Create a temporary directory for our intermediate files
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # First pass: Process records in batches and write to temp file with hashes
+        temp_file_path = os.path.join(temp_dir, "records_with_hashes.jsonl")
+        
+        print("Pass 1: Processing records and generating hashes...")
+        total_processed = 0
+        batch_records = []
+        batch_count = 0
+        
+        with open(temp_file_path, 'w', encoding='utf-8') as temp_f:
+            # Process the records in batches
+            for record in tqdm(records, desc="Processing records (pass 1)", unit="record"):
+                batch_records.append(record)
+                
+                # Process when we reach the batch size
+                if len(batch_records) >= batch_size:
+                    batch_count += 1
+                    # Process this batch (deduplicates within batch)
+                    processed_batch = process_batch(batch_records, group_by_email, batch_count)
+                    
+                    # Generate hash for each record and write to temp file
+                    for r in processed_batch:
+                        # Create a hash key for the record (same logic as in deduplicate_records)
+                        record_no_source = {k: v for k, v in r.items() if k != '_source_file'}
+                        try:
+                            record_hash = json.dumps(record_no_source, sort_keys=True, separators=(',', ':'))
+                        except TypeError:
+                            record_hash = json.dumps({k: str(v) for k, v in record_no_source.items()}, sort_keys=True, separators=(',', ':'))
+                        
+                        # Write record with its hash
+                        temp_f.write(json.dumps({"hash": record_hash, "record": r}) + '\n')
+                    
+                    total_processed += len(processed_batch)
+                    batch_records = []
+            
+            # Process any remaining records
+            if batch_records:
+                batch_count += 1
+                processed_batch = process_batch(batch_records, group_by_email, batch_count)
+                
+                for r in processed_batch:
+                    # Create a hash key for the record
+                    record_no_source = {k: v for k, v in r.items() if k != '_source_file'}
+                    try:
+                        record_hash = json.dumps(record_no_source, sort_keys=True, separators=(',', ':'))
+                    except TypeError:
+                        record_hash = json.dumps({k: str(v) for k, v in record_no_source.items()}, sort_keys=True, separators=(',', ':'))
+                    
+                    # Write record with its hash
+                    temp_f.write(json.dumps({"hash": record_hash, "record": r}) + '\n')
+                
+                total_processed += len(processed_batch)
+        
+        # Second pass: Read the temp file and deduplicate across all batches, write to JSON
+        print(f"Pass 1 complete: Processed {total_processed} records")
+        print("Pass 2: Deduplicating and writing to JSON...")
+        
+        seen_hashes = set()
+        all_records = []
+        
+        with open(temp_file_path, 'r', encoding='utf-8') as temp_f:
+            for line in tqdm(temp_f, desc="Deduplicating (pass 2)", unit="record"):
+                data = json.loads(line)
+                record_hash = data["hash"]
+                record = data["record"]
+                
+                # Only add if we haven't seen this hash before
+                if record_hash not in seen_hashes:
+                    seen_hashes.add(record_hash)
+                    # Remove source file if not requested
+                    if not include_source and '_source_file' in record:
+                        record = {k: v for k, v in record.items() if k != '_source_file'}
+                    all_records.append(record)
+        
+        # Write all records to JSON file
+        print("Writing JSON file...")
+        with open(output_path, 'w', encoding='utf-8') as out_f:
+            json.dump(all_records, out_f, indent=2, ensure_ascii=False)
+        
+        total_records = len(all_records)
+    
+    print(f"Deduplication complete: {total_processed} records processed, {total_records} unique records written to JSON")
+    return total_records
+
+def write_data(records: Iterator[Dict[str, Any]], output_path: str, output_format: str = "jsonl", 
+               batch_size: int = 1000, group_by_email: bool = False, include_source: bool = True) -> int:
+    """
+    Write records to a file in the specified format.
+    
+    Args:
+        records: Iterator of record dictionaries
+        output_path: Path to output file
+        output_format: Output format ('jsonl', 'csv', or 'json')
+        batch_size: Number of records to process in each batch
+        group_by_email: Whether to group records by email
+        include_source: Whether to include source file information in output
+        
+    Returns:
+        Total number of records written
+    """
+    if output_format == "csv":
+        return write_csv(records, output_path, batch_size, group_by_email, include_source)
+    elif output_format == "json":
+        return write_json(records, output_path, batch_size, group_by_email, include_source)
+    elif output_format == "jsonl":
+        return write_jsonl(records, output_path, batch_size, group_by_email, include_source)
+    else:
+        raise ValueError(f"Unsupported output format: {output_format}")

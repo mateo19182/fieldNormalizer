@@ -18,7 +18,7 @@ from src.field_normalizer import analyze_field_variations, group_fields
 from src.field_mapper import create_field_mappings, format_mappings_report, DEFAULT_TARGET_FIELDS, FieldMapper
 from src.ai_field_mapper import create_ai_field_mappings, format_ai_mappings_report, AIFieldMapper
 from src.ai_mapping_validator import validate_mappings_with_ai, format_changes_diff, AIMappingValidator
-from src.data_extractor import extract_all_data, write_jsonl
+from src.data_extractor import extract_all_data, write_jsonl, write_data
 
 
 def load_config(config_file: str) -> Dict[str, Any]:
@@ -125,7 +125,7 @@ def parse_args():
         "--output",
         "-o",
         default="extracted_data.jsonl",
-        help="Output file for extracted data (JSONL format)",
+        help="Output file for extracted data (format determined by --output-format)",
     )
     extract_parser.add_argument(
         "--batch-size",
@@ -142,6 +142,17 @@ def parse_args():
         "--use-ai",
         action="store_true",
         help="Use AI-based field mappings (requires OPENROUTER_API_KEY in .env file)",
+    )
+    extract_parser.add_argument(
+        "--output-format",
+        choices=["jsonl", "csv", "json"],
+        default="jsonl",
+        help="Output format for extracted data (default: jsonl)",
+    )
+    extract_parser.add_argument(
+        "--include-source",
+        action="store_true",
+        help="Include source file information in the output (disabled by default)",
     )
     
     # 3. Validate command - for validating and correcting existing mappings using AI
@@ -206,7 +217,7 @@ def parse_args():
         "--extract-output",
         "-o",
         default="extracted_data.jsonl",
-        help="Output file for extracted data (default: extracted_data.jsonl)",
+        help="Output file for extracted data (format determined by --output-format)",
     )
     process_parser.add_argument(
         "--batch-size",
@@ -242,6 +253,17 @@ def parse_args():
     process_parser.add_argument(
         "--data-description",
         help="Description of the data you are looking for (helps AI determine file relevance)",
+    )
+    process_parser.add_argument(
+        "--output-format",
+        choices=["jsonl", "csv", "json"],
+        default="jsonl",
+        help="Output format for extracted data (default: jsonl)",
+    )
+    process_parser.add_argument(
+        "--include-source",
+        action="store_true",
+        help="Include source file information in the output (disabled by default)",
     )
     
     return parser.parse_args()
@@ -510,34 +532,39 @@ async def async_main():
         
         print(f"Extracting data from {len(file_paths)} files using mappings in {args.mappings}")
         
+        # Adjust output file extension based on format
+        output_path = adjust_output_extension(args.output, args.output_format)
+        
         # Extract data
-        record_count = write_jsonl(
+        record_count = write_data(
             extract_all_data(file_paths, mapper),
-            args.output,
+            output_path,
+            args.output_format,
             args.batch_size,
-            args.group_by_email
+            args.group_by_email,
+            args.include_source
         )
         
-        print(f"Extracted {record_count} records to {args.output}")
+        print(f"Extracted {record_count} records to {output_path}")
 
-        # Summarize lines written from each file into the output
-        try:
-            from collections import Counter
-            file_counts = Counter()
-            with open(args.output, 'r', encoding='utf-8') as f:
-                for line in f:
-                    try:
-                        obj = json.loads(line)
-                        src = obj.get('_source_file', 'UNKNOWN')
-                        file_counts[src] += 1
-                    except Exception:
-                        continue
-            print("\nLines written per source file:")
-            print("=" * 80)
-            for fname, count in file_counts.most_common():
-                print(f"  {fname}: {count}")
-        except Exception as e:
-            print(f"Warning: Could not summarize per-file line counts: {e}")
+        # # Summarize lines written from each file into the output
+        # try:
+        #     from collections import Counter
+        #     file_counts = Counter()
+        #     with open(args.output, 'r', encoding='utf-8') as f:
+        #         for line in f:
+        #             try:
+        #                 obj = json.loads(line)
+        #                 src = obj.get('_source_file', 'UNKNOWN')
+        #                 file_counts[src] += 1
+        #             except Exception:
+        #                 continue
+        #     print("\nLines written per source file:")
+        #     print("=" * 80)
+        #     for fname, count in file_counts.most_common():
+        #         print(f"  {fname}: {count}")
+        # except Exception as e:
+        #     print(f"Warning: Could not summarize per-file line counts: {e}")
 
     # Handle the validate command
     elif args.command == "validate":
@@ -668,14 +695,20 @@ async def async_main():
         
         # Extract data
         print(f"Extracting data from {len(data_files)} files...")
-        record_count = write_jsonl(
+        
+        # Adjust output file extension based on format
+        extract_output_path = adjust_output_extension(args.extract_output, args.output_format)
+        
+        record_count = write_data(
             extract_all_data(data_files, mapper),
-            args.extract_output,
+            extract_output_path,
+            args.output_format,
             args.batch_size,
-            args.group_by_email
+            args.group_by_email,
+            args.include_source
         )
         
-        print(f"Extracted {record_count} records to {args.extract_output}")
+        print(f"Extracted {record_count} records to {extract_output_path}")
 
 
 def format_field_groups(field_groups: Dict[str, Set[str]], header_stats: Dict[str, Dict[str, Any]] = None) -> str:
@@ -793,6 +826,30 @@ def format_analysis_report(
     # Remove None entries
     lines = [l for l in lines if l is not None]
     return "\n".join(lines)
+
+def adjust_output_extension(output_path: str, output_format: str) -> str:
+    """
+    Adjust the output file extension based on the output format.
+    
+    Args:
+        output_path: Original output path
+        output_format: Output format ('jsonl', 'csv', or 'json')
+        
+    Returns:
+        Output path with correct extension
+    """
+    # Get the base path without extension
+    base_path = os.path.splitext(output_path)[0]
+    
+    # Map format to extension
+    format_extensions = {
+        'jsonl': '.jsonl',
+        'csv': '.csv',
+        'json': '.json'
+    }
+    
+    # Return path with correct extension
+    return base_path + format_extensions.get(output_format, '.jsonl')
 
 def main():
     """Main entry point that runs the async main function."""

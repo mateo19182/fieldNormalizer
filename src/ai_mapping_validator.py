@@ -99,7 +99,7 @@ class AIMappingValidator:
                     full_path = file_data.get("_full_path", filename)
                     mappings_to_validate[full_path] = file_data["mappings"]
         
-        self._log_debug(f"Extracted {len(mappings_to_validate)} files to validate")
+        # self._log_debug(f"Extracted {len(mappings_to_validate)} files to validate")
         
         if not mappings_to_validate:
             print("No mappings found in the provided file.")
@@ -136,7 +136,7 @@ class AIMappingValidator:
         mapping_items = list(all_mappings.items())
         batches = [mapping_items[i:i + batch_size] for i in range(0, len(mapping_items), batch_size)]
         
-        self._log_debug(f"Processing {len(all_mappings)} files in {len(batches)} batches of up to {batch_size} files each")
+        # self._log_debug(f"Processing {len(all_mappings)} files in {len(batches)} batches of up to {batch_size} files each")
         
         corrected_mappings = {}
         
@@ -184,7 +184,7 @@ class AIMappingValidator:
             filename = os.path.basename(file_path)
             mappings_for_prompt[filename] = file_mappings
         
-        self._log_debug(f"Batch {batch_num}: prepared {len(mappings_for_prompt)} files for AI validation")
+        # self._log_debug(f"Batch {batch_num}: prepared {len(mappings_for_prompt)} files for AI validation")
         
         # Prepare the prompt for validation
         user_description = f"\n\nUser description of relevant data: {self.data_description}" if self.data_description else ""
@@ -228,7 +228,7 @@ JSON response:
             "max_tokens": 2000
         }
         
-        self._log_debug(f"Batch {batch_num}: sending request to AI")
+        # self._log_debug(f"Batch {batch_num}: sending request to AI")
         
         try:
             async with self._session.post(
@@ -240,7 +240,7 @@ JSON response:
                 result = await response.json()
                 content = result['choices'][0]['message']['content']
             
-            self._log_debug(f"Batch {batch_num}: received AI response")
+            # self._log_debug(f"Batch {batch_num}: received AI response")
             
             # Try to parse the JSON object from the response
             try:
@@ -252,7 +252,7 @@ JSON response:
                 
                 corrected_mappings_by_filename = json.loads(content)
                 
-                self._log_debug(f"Batch {batch_num}: successfully parsed JSON response with {len(corrected_mappings_by_filename)} files")
+                # self._log_debug(f"Batch {batch_num}: successfully parsed JSON response with {len(corrected_mappings_by_filename)} files")
                 
                 # Convert back to full file paths and validate target fields
                 corrected_mappings = {}
@@ -285,7 +285,7 @@ JSON response:
                     else:
                         self._log_debug(f"No valid mappings for {filename} in batch {batch_num} after validation")
                 
-                self._log_debug(f"Batch {batch_num}: validation completed with {len(corrected_mappings)} valid files")
+                # self._log_debug(f"Batch {batch_num}: validation completed with {len(corrected_mappings)} valid files")
                 return corrected_mappings
                 
             except json.JSONDecodeError as e:
