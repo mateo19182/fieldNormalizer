@@ -232,7 +232,7 @@ def extract_data_from_jsonl(file_path: str, field_mapping: Dict[str, List[str]])
 
 def extract_data_from_sql(file_path: str, field_mapping: Dict[str, List[str]]) -> Iterator[Dict[str, Any]]:
     """
-    Extract data from a SQL file based on field mappings.
+    Extract data from a SQL file using the robust SQL parser.
     
     Args:
         file_path: Path to the SQL file
@@ -241,105 +241,8 @@ def extract_data_from_sql(file_path: str, field_mapping: Dict[str, List[str]]) -
     Yields:
         Dictionaries containing extracted data with normalized field names
     """
-    try:
-        with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
-            content = f.read()
-            
-            # Find all INSERT statements
-            import re
-            insert_pattern = r"INSERT\s+INTO\s+`?(\w+)`?\s*\(([^)]+)\)\s*VALUES\s*(.+?);"
-            matches = re.finditer(insert_pattern, content, re.IGNORECASE | re.MULTILINE)
-            
-            for match in tqdm(matches, desc="Processing SQL INSERT statements", unit="statement"):
-                table_name = match.group(1)
-                columns_str = match.group(2)
-                values_str = match.group(3)
-                
-                # Parse column names
-                columns = [col.strip().strip('`') for col in columns_str.split(',')]
-                
-                # Create a mapping from column index to normalized field
-                column_mapping = {}
-                for field_type, original_headers in field_mapping.items():
-                    for header in original_headers:
-                        if header in columns:
-                            column_idx = columns.index(header)
-                            column_mapping[column_idx] = (field_type, header)
-                
-                # Parse values - handle both single and multi-row inserts
-                # First, split into individual value sets
-                value_sets = []
-                current_set = []
-                in_quotes = False
-                current_value = ""
-                
-                for char in values_str:
-                    if char == "'" and (len(current_value) == 0 or current_value[-1] != '\\'):
-                        in_quotes = not in_quotes
-                        current_value += char
-                    elif char == ',' and not in_quotes:
-                        current_set.append(current_value.strip())
-                        current_value = ""
-                    elif char == '(' and not in_quotes and not current_value:
-                        # Start of new value set
-                        if current_set:
-                            value_sets.append(current_set)
-                            current_set = []
-                    elif char == ')' and not in_quotes:
-                        # End of value set
-                        if current_value.strip():
-                            current_set.append(current_value.strip())
-                        if current_set:
-                            value_sets.append(current_set)
-                            current_set = []
-                        current_value = ""
-                    else:
-                        current_value += char
-                
-                # Process each set of values
-                for value_set in value_sets:
-                    if len(value_set) != len(columns):
-                        continue  # Skip malformed rows
-                    
-                    record = {}
-                    
-                    # Extract data based on mappings
-                    for col_idx, (field_type, original_header) in column_mapping.items():
-                        if col_idx < len(value_set):
-                            value = value_set[col_idx].strip()
-                            
-                            # Remove surrounding quotes if present
-                            if value.startswith("'") and value.endswith("'"):
-                                value = value[1:-1]
-                            
-                            # Skip NULL values
-                            if not value or value.upper() in ('NULL', 'N/A', 'NONE', ''):
-                                continue
-                            
-                            # Validate field value based on field type
-                            validated_value = validate_field_value(field_type, value)
-                            if validated_value is None:
-                                continue
-                            
-                            # Handle multiple fields mapping to the same normalized field
-                            if field_type in record:
-                                if isinstance(record[field_type], list):
-                                    if validated_value not in record[field_type]:
-                                        record[field_type].append(validated_value)
-                                else:
-                                    if validated_value != record[field_type]:
-                                        record[field_type] = [record[field_type], validated_value]
-                            else:
-                                record[field_type] = validated_value
-                    
-                    # Only yield records that have at least one of our target fields
-                    if record:
-                        # Add source file information
-                        record['_source_file'] = os.path.basename(file_path)
-                        yield record
-                        
-    except Exception as e:
-        print(f"Error extracting data from SQL file {file_path}: {str(e)}", file=sys.stderr)
+    from .sql_parser import sql_parser
+    yield from sql_parser.extract_data_from_sql(file_path, field_mapping)
 
 def _process_json_object(obj: Dict[str, Any], field_mapping: Dict[str, List[str]], file_path: str) -> Iterator[Dict[str, Any]]:
     """

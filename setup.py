@@ -8,7 +8,8 @@ setup(
         "python-dotenv",
         "requests",
         "tqdm",
-        "aiohttp"
+        "aiohttp",
+        "sqlparse"
     ],
     entry_points={
         'console_scripts': [

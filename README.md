@@ -2,19 +2,41 @@
 
 A powerful command-line tool for extracting, normalizing, and processing structured data from various file formats (CSV, JSON, SQL). The tool specializes in identifying and categorizing fields related to personal information such as names, email addresses, phone numbers, and physical addresses.
 
+**Enhanced SQL Processing**: The tool now features a robust SQL parser that can handle various SQL dump formats including MySQL, PostgreSQL, and SQLite. It supports multiple tables within a single SQL file, various statement types (INSERT, REPLACE, COPY), and can process both small and large SQL dumps efficiently with streaming support.
+
 ## Overview
 
 Field Normalizer provides a two-step workflow:
 1. **Analyze**: Extract and normalize headers from data files, categorizing them by field type and creating field mappings
-2. **Extract**: Generate a JSONL file containing the actual data from fields matching specific categories
+2. **Extract**: Generate output files (JSONL, CSV, or JSON format) containing the actual data from fields matching specific categories
 
 This tool is designed to handle large files and process data in a memory-efficient manner, making it suitable for batch processing of substantial datasets. It also provides smart features like deduplication, merging records with the same email, and ignoring NULL values. Files with only one mapping are automatically ignored during the extract phase to ensure data quality.
+
+### SQL Processing Features
+
+The enhanced SQL parser provides:
+
+- **Multi-Table Support**: Processes multiple tables within a single SQL file, extracting and normalizing data from all tables
+- **Multiple SQL Dialects**: Supports MySQL, PostgreSQL, SQLite, and standard SQL formats
+- **Various Statement Types**: Handles INSERT, REPLACE, INSERT OR REPLACE, INSERT...ON DUPLICATE KEY UPDATE, and PostgreSQL COPY statements
+- **Streaming Processing**: Automatically uses streaming for large SQL files (>100MB) to minimize memory usage
+- **Robust Parsing**: Uses the `sqlparse` library with fallback to manual parsing for maximum compatibility
+- **Schema Detection**: Extracts column information from CREATE TABLE statements when available, falls back to INSERT statement analysis
+- **Cross-Table Field Mapping**: Maps columns with similar names across different tables to the same target fields
 
 ## Installation
 
 ### Prerequisites
 - Python 3.8 or higher
 - pip (Python package installer)
+
+### Dependencies
+The tool automatically installs the following dependencies:
+- `sqlparse` - For robust SQL parsing and statement analysis
+- `tqdm` - For progress bars during processing
+- `requests` - For API communications
+- `aiohttp` - For asynchronous API requests
+- `python-dotenv` - For environment variable management
 
 ### Install from Source
 ```bash
@@ -58,7 +80,9 @@ field-normalizer extract [OPTIONS]
 
 ##### Extract Command Options
 - `--mappings` - Field mappings file (default: mappings.json)
-- `--output, -o` - Output file for extracted data (default: extracted_data.jsonl)
+- `--output, -o` - Output file for extracted data (format determined by --output-format)
+- `--output-format` - Output format for extracted data: jsonl, csv, or json (default: jsonl)
+- `--include-source` - Include source file information in the output (disabled by default)
 - `--batch-size` - Batch size for writing records (default: 1000)
 - `--group-by-email` - Group records by email address (disabled by default)
 - `--use-ai` - Use AI-based field mappings (requires OPENROUTER_API_KEY in .env file)
@@ -88,7 +112,9 @@ field-normalizer process [OPTIONS] PATHS...
 - `--max-files, -n` - Maximum number of files to process per directory
 - `--analysis-output` - Output file for analysis report (default: no file output)
 - `--mappings-output` - Output file for field mappings (default: mappings.json)
-- `--extract-output, -o` - Output file for extracted data (default: extracted_data.jsonl)
+- `--extract-output, -o` - Output file for extracted data (format determined by --output-format)
+- `--output-format` - Output format for extracted data: jsonl, csv, or json (default: jsonl)
+- `--include-source` - Include source file information in the output (disabled by default)
 - `--batch-size` - Batch size for writing records (default: 1000)
 - `--no-normalize` - Disable field normalization (enabled by default)
 - `--no-variations` - Disable showing field variations (enabled by default)
@@ -130,8 +156,20 @@ field-normalizer analyze /path/to/data --use-ai --data-description "Looking for 
 # Extract data using mappings.json (automatically uses paths from the mappings file)
 field-normalizer extract
 
-# Extract data to a specific output file
+# Extract data to a specific output file in JSONL format (default)
 field-normalizer extract --output contacts.jsonl
+
+# Extract data in CSV format
+field-normalizer extract --output contacts.csv --output-format csv
+
+# Extract data in JSON format
+field-normalizer extract --output contacts.json --output-format json
+
+# Extract data without source file information
+field-normalizer extract --output contacts.csv --output-format csv
+
+# Extract data with source file information included
+field-normalizer extract --output contacts.csv --output-format csv --include-source
 
 # Use a different mappings file
 field-normalizer extract --mappings custom_mappings.json
@@ -163,14 +201,157 @@ field-normalizer validate --mappings old_mappings.json --output new_mappings.jso
 # Process all files in one step (analyze and extract)
 field-normalizer process /path/to/data
 
-# Specify output files for each step
+# Specify output files for each step in JSONL format (default)
 field-normalizer process /path/to/data --analysis-output report.txt --extract-output contacts.jsonl
+
+# Process and extract data in CSV format
+field-normalizer process /path/to/data --extract-output contacts.csv --output-format csv
+
+# Process and extract data in JSON format with source file information
+field-normalizer process /path/to/data --extract-output contacts.json --output-format json --include-source
 
 # Process specific file types with a limit
 field-normalizer process /path/to/data --file-types csv json --max-files 50
 
 # Use AI-based field mapping with custom target fields and data description
 field-normalizer process /path/to/data --use-ai --target-fields name email phone address company title --data-description "Looking for customer support tickets with contact information"
+```
+
+## SQL File Processing
+
+The tool provides enhanced support for SQL dump files with the following capabilities:
+
+### Supported SQL Formats
+
+- **MySQL Dumps**: Standard mysqldump output with INSERT statements
+- **PostgreSQL Dumps**: pg_dump output including COPY statements
+- **SQLite Dumps**: .dump format with INSERT OR REPLACE statements
+- **Mixed Formats**: Files containing multiple statement types
+
+### Multi-Table Processing
+
+When processing SQL files with multiple tables:
+
+1. **Schema Analysis**: Extracts column names from all CREATE TABLE statements
+2. **Cross-Table Mapping**: Maps similar column names across tables to the same target fields
+3. **Unified Output**: Combines data from all tables into a single normalized output
+
+Example SQL file with multiple tables:
+```sql
+CREATE TABLE users (id INT, email VARCHAR(255), first_name VARCHAR(100));
+CREATE TABLE customers (customer_id INT, customer_email VARCHAR(255), name VARCHAR(100));
+
+INSERT INTO users VALUES (1, 'john@example.com', 'John');
+INSERT INTO customers VALUES (1, 'jane@example.com', 'Jane Smith');
+```
+
+The tool will:
+- Extract headers: `id`, `email`, `first_name`, `customer_id`, `customer_email`, `name`
+- Map both `email` and `customer_email` to the `email` target field
+- Map both `first_name` and `name` to the `name` target field
+- Output normalized records from both tables
+
+### Performance Optimizations
+
+- **Automatic Streaming**: Files larger than 100MB are processed using streaming to minimize memory usage
+- **Progress Tracking**: Real-time progress bars for large file processing
+- **Efficient Parsing**: Uses `sqlparse` library with manual fallback for maximum compatibility
+- **Batch Processing**: Processes statements in batches for optimal performance
+
+### Supported SQL Statements
+
+- `INSERT INTO table (...) VALUES (...)`
+- `REPLACE INTO table (...) VALUES (...)` (MySQL)
+- `INSERT OR REPLACE INTO table (...) VALUES (...)` (SQLite)
+- `INSERT INTO table (...) VALUES (...) ON DUPLICATE KEY UPDATE ...` (MySQL)
+- `COPY table (...) FROM stdin` followed by tab-separated data (PostgreSQL)
+
+## Output Formats
+
+Field Normalizer supports three output formats for extracted data:
+
+### 1. JSONL (JSON Lines) - Default
+
+The default output format where each record is written as a JSON array on a separate line. This format is memory-efficient for large datasets and easy to process line by line.
+
+**Example output:**
+```jsonl
+[["John Doe"], ["john.doe@email.com"], ["555-1234"], ["123 Main St"], "contacts.csv"]
+[["Jane Smith"], ["jane@company.com"], ["555-5678"], ["456 Oak Ave"], "contacts.csv"]
+```
+
+**Structure:** `[name, email, phone, address, source_file]` (source_file included only with `--include-source`)
+
+### 2. CSV (Comma-Separated Values)
+
+Standard CSV format with headers. List values within fields are joined with semicolons.
+
+**Example output:**
+```csv
+name,email,phone,address,_source_file
+John Doe,john.doe@email.com,555-1234,123 Main St,contacts.csv
+Jane Smith,jane@company.com,555-5678,456 Oak Ave,contacts.csv
+```
+
+**Features:**
+- Header row with field names
+- List values joined with "; " separator
+- Source file column included only with `--include-source`
+
+### 3. JSON (Standard JSON)
+
+Standard JSON array format containing all records. This format loads the entire dataset into memory.
+
+**Example output:**
+```json
+[
+  {
+    "name": ["John Doe"],
+    "email": ["john.doe@email.com"],
+    "phone": ["555-1234"],
+    "address": ["123 Main St"],
+    "_source_file": "contacts.csv"
+  },
+  {
+    "name": ["Jane Smith"],
+    "email": ["jane@company.com"],
+    "phone": ["555-5678"],
+    "address": ["456 Oak Ave"],
+    "_source_file": "contacts.csv"
+  }
+]
+```
+
+**Features:**
+- Human-readable format with proper indentation
+- All field values are arrays for consistency
+- Source file field included only with `--include-source`
+
+### Automatic File Extension
+
+The tool automatically adjusts the output file extension based on the selected format:
+- `--output-format jsonl` → `.jsonl` extension
+- `--output-format csv` → `.csv` extension  
+- `--output-format json` → `.json` extension
+
+**Example:**
+```bash
+# These commands will create files with appropriate extensions
+field-normalizer extract --output contacts --output-format csv    # Creates contacts.csv
+field-normalizer extract --output data --output-format json      # Creates data.json
+field-normalizer extract --output results --output-format jsonl  # Creates results.jsonl
+```
+
+### Source File Information
+
+By default, source file information is **not** included in the output. Use the `--include-source` flag to add source file information:
+
+```bash
+# Without source file information (default)
+field-normalizer extract --output contacts.csv --output-format csv
+
+# With source file information
+field-normalizer extract --output contacts.csv --output-format csv --include-source
 ```
 
 ## Field Mapping Strategies
@@ -397,7 +578,7 @@ The Field Normalizer is built around five main components:
 7. **Record Merging**: Records with the same email address are merged
 8. **Deduplication**: Duplicate records are removed
 9. **NULL Handling**: NULL values are ignored
-10. **JSONL Output**: Records are written to output in JSONL format in batches
+10. **Output Generation**: Records are written to output in the specified format (JSONL, CSV, or JSON) in batches
 
 ### Memory-Efficient Processing
 

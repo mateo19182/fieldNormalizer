@@ -483,43 +483,13 @@ def _extract_from_json(file_path: str, seen: set) -> List[str]:
 
 def extract_headers_from_sql(file_path: str) -> List[str]:
     """
-    Extract column names from SQL CREATE TABLE statements.
+    Extract column names from SQL files using the robust SQL parser.
     
     Args:
         file_path: Path to the SQL file
         
     Returns:
-        List of column names found in CREATE TABLE statements, preserving order
+        List of column names found in the SQL file
     """
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            sql_content = f.read()
-    except Exception as e:
-        print(f"Error reading SQL file {file_path}: {str(e)}", file=sys.stderr)
-        return []
-    
-    # Find CREATE TABLE statements with backticks for table names and column names
-    create_table_pattern = r'CREATE\s+TABLE\s+(?:`[^`]+`|\w+)\s*\((.*?)\)(?:\s*ENGINE|\s*;)'
-    create_table_matches = re.finditer(create_table_pattern, sql_content, re.IGNORECASE | re.DOTALL)
-    
-    headers = []
-    seen = set()
-    
-    for match in create_table_matches:
-        # Extract column definitions
-        column_defs = match.group(1)
-        
-        # Extract column names using regex that handles backtick quotes
-        # This pattern looks for `column_name` or column_name followed by type definition
-        column_pattern = r'\s*(?:`([^`]+)`|(\w+))\s+\w+'
-        column_matches = re.finditer(column_pattern, column_defs, re.MULTILINE)
-        
-        for col_match in column_matches:
-            # Get the column name (either from backtick group or regular group)
-            col_name = col_match.group(1) if col_match.group(1) else col_match.group(2)
-            if col_name and not col_name.upper() in ('PRIMARY', 'FOREIGN', 'UNIQUE', 'CHECK', 'CONSTRAINT', 'KEY'):
-                if col_name not in seen:
-                    headers.append(col_name)
-                    seen.add(col_name)
-    
-    return headers
+    from .sql_parser import sql_parser
+    return sql_parser.extract_headers_from_sql(file_path)

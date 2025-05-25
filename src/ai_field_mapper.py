@@ -201,29 +201,36 @@ class AIFieldMapper:
                     }, "json"
             
             elif ext == 'sql':
-                # For SQL files, we'll extract INSERT statements and format them
-                with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
-                    content = f.read(8192)  # Read a portion of the file
+                # For SQL files, use the robust SQL parser to get sample data
+                from .sql_parser import sql_parser
                 
-                # Find the first INSERT statement
-                import re
-                insert_pattern = r"INSERT\s+INTO\s+`?(\w+)`?\s*\(([^)]+)\)\s*VALUES\s*(.+?);"
-                match = re.search(insert_pattern, content, re.IGNORECASE | re.MULTILINE)
-                
-                if match:
-                    table_name = match.group(1)
-                    columns_str = match.group(2)
-                    values_str = match.group(3).strip()
+                try:
+                    # Get a small sample of data using the SQL parser
+                    sample_records = []
+                    record_count = 0
                     
-                    # Parse column names
-                    columns = [col.strip().strip('`') for col in columns_str.split(',')]
+                    # Create a dummy field mapping to extract any data
+                    dummy_mapping = {header: [header] for header in headers[:10]}  # Limit to first 10 headers
                     
-                    # Show a sample of the SQL statement
+                    for record in sql_parser.extract_data_from_sql(file_path, dummy_mapping):
+                        sample_records.append(record)
+                        record_count += 1
+                        if record_count >= 3:  # Get up to 3 sample records
+                            break
+                    
                     return {
-                        "table": table_name,
-                        "columns": columns,
-                        "sample_sql": f"INSERT INTO {table_name} ({columns_str}) VALUES {values_str[:200]}...",
-                        "headers": headers
+                        "headers": headers,
+                        "sample_records": sample_records,
+                        "record_count": record_count,
+                        "file_type": "sql"
+                    }, "sql"
+                    
+                except Exception as e:
+                    # Fallback to basic file info
+                    return {
+                        "headers": headers,
+                        "error": f"Could not extract sample data: {str(e)}",
+                        "file_type": "sql"
                     }, "sql"
         
         except Exception as e:
