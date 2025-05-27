@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Field Normalizer CLI
+Ultimate Parser CLI
 A tool to extract and normalize headers from various data files (CSV, JSON, SQL, etc.)
 """
 import argparse
@@ -13,8 +13,8 @@ from typing import Dict, List, Set, Tuple, Any
 from tqdm import tqdm
 import time
 
-from src.extractors import extract_headers_from_file
-from src.field_normalizer import analyze_field_variations, group_fields
+from src.header_extractors import extract_headers_from_file
+from src.field_utilities import analyze_field_variations, group_fields
 from src.field_mapper import create_field_mappings, format_mappings_report, DEFAULT_TARGET_FIELDS, FieldMapper
 from src.ai_field_mapper import create_ai_field_mappings, format_ai_mappings_report, AIFieldMapper
 from src.ai_mapping_validator import validate_mappings_with_ai, format_changes_diff, AIMappingValidator
@@ -43,7 +43,7 @@ def load_config(config_file: str) -> Dict[str, Any]:
 def parse_args():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
-        description="Field Normalizer - Extract and normalize fields from various data sources"
+        description="Ultimate Parser - Extract and normalize fields from various data sources"
     )
     
     # Add common arguments to the main parser
@@ -807,10 +807,10 @@ def format_analysis_report(
     processing_time: float = None
 ) -> str:
     """
-    Unified formatting for field normalizer analysis report (with useful extra info).
+    Unified formatting for ultimate parser analysis report (with useful extra info).
     """
     lines = [
-        "Field Normalizer Analysis Report",
+        "Ultimate Parser Analysis Report",
         "=" * 80,
         f"Analysis run at: {datetime_str}" if datetime_str else None,
         f"Processing time: {processing_time:.2f} seconds" if processing_time else None,

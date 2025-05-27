@@ -1,4 +1,4 @@
-# Field Normalizer - Future Improvements
+# Ultimate Parser - Future Improvements
 
 define pipeline better
 
@@ -8,4 +8,9 @@ define pipeline better
 - [ ] Implement parallel processing for faster execution
 - [ ] Add support for incremental processing (only process new or changed files)
 - [ ] web interface ?
-- do actual sql
+- check if sql good
+- xlxs...
+
+- better check to know if headers are ok!
+    - if one is missing infer
+- zip support

@@ -1,4 +1,4 @@
-# Field Normalizer
+# Ultimate Parser
 
 A powerful command-line tool for extracting, normalizing, and processing structured data from various file formats (CSV, JSON, SQL). The tool specializes in identifying and categorizing fields related to personal information such as names, email addresses, phone numbers, and physical addresses.
 
@@ -6,7 +6,7 @@ A powerful command-line tool for extracting, normalizing, and processing structu
 
 ## Overview
 
-Field Normalizer provides a two-step workflow:
+Ultimate Parser provides a two-step workflow:
 1. **Analyze**: Extract and normalize headers from data files, categorizing them by field type and creating field mappings
 2. **Extract**: Generate output files (JSONL, CSV, or JSON format) containing the actual data from fields matching specific categories
 
@@ -40,8 +40,8 @@ The tool automatically installs the following dependencies:
 
 ### Install from Source
 ```bash
-git clone https://github.com/yourusername/fieldNormalizer.git
-cd fieldNormalizer
+git clone https://github.com/yourusername/ultimateParser.git
+cd ultimateParser
 pip install -e .
 ```
 
@@ -59,7 +59,7 @@ The tool offers four command options for flexibility:
 
 #### Step 1: Analyze Command
 ```bash
-field-normalizer analyze [OPTIONS] PATHS...
+ultimate-parser analyze [OPTIONS] PATHS...
 ```
 
 ##### Analyze Command Options
@@ -75,7 +75,7 @@ field-normalizer analyze [OPTIONS] PATHS...
 
 #### Step 2: Extract Command
 ```bash
-field-normalizer extract [OPTIONS]
+ultimate-parser extract [OPTIONS]
 ```
 
 ##### Extract Command Options
@@ -90,7 +90,7 @@ field-normalizer extract [OPTIONS]
 ### Option 2: Validate Command (AI-Based Mapping Validation)
 
 ```bash
-field-normalizer validate [OPTIONS]
+ultimate-parser validate [OPTIONS]
 ```
 
 The validate command uses AI to review and correct existing field mappings for accuracy and logical consistency.
@@ -104,7 +104,7 @@ The validate command uses AI to review and correct existing field mappings for a
 ### Option 3: One-Step Workflow (Process)
 
 ```bash
-field-normalizer process [OPTIONS] PATHS...
+ultimate-parser process [OPTIONS] PATHS...
 ```
 
 #### Process Command Options
@@ -130,91 +130,91 @@ field-normalizer process [OPTIONS] PATHS...
 ##### Step 1: Analyze Files and Create Mappings
 ```bash
 # Analyze all supported files in a directory (with default normalization)
-field-normalizer analyze /path/to/data
+ultimate-parser analyze /path/to/data
 
 # Process specific file types with a limit
-field-normalizer analyze /path/to/data --file-types csv json --max-files 50
+ultimate-parser analyze /path/to/data --file-types csv json --max-files 50
 
 # Analyze files and save results to a file
-field-normalizer analyze /path/to/data --output analysis_report.txt
+ultimate-parser analyze /path/to/data --output analysis_report.txt
 
 # Disable normalization or variations
-field-normalizer analyze /path/to/data --no-normalize --output raw_headers.txt
+ultimate-parser analyze /path/to/data --no-normalize --output raw_headers.txt
 
 # Use AI-based field mapping with default target fields
-field-normalizer analyze /path/to/data --use-ai
+ultimate-parser analyze /path/to/data --use-ai
 
 # Use AI-based field mapping with custom target fields
-field-normalizer analyze /path/to/data --use-ai --target-fields name email phone address company title
+ultimate-parser analyze /path/to/data --use-ai --target-fields name email phone address company title
 
 # Use AI-based field mapping with data description to improve relevance detection
-field-normalizer analyze /path/to/data --use-ai --data-description "Looking for customer contact data from e-commerce transactions"
+ultimate-parser analyze /path/to/data --use-ai --data-description "Looking for customer contact data from e-commerce transactions"
 ```
 
 ##### Step 2: Extract Data Using Mappings
 ```bash
 # Extract data using mappings.json (automatically uses paths from the mappings file)
-field-normalizer extract
+ultimate-parser extract
 
 # Extract data to a specific output file in JSONL format (default)
-field-normalizer extract --output contacts.jsonl
+ultimate-parser extract --output contacts.jsonl
 
 # Extract data in CSV format
-field-normalizer extract --output contacts.csv --output-format csv
+ultimate-parser extract --output contacts.csv --output-format csv
 
 # Extract data in JSON format
-field-normalizer extract --output contacts.json --output-format json
+ultimate-parser extract --output contacts.json --output-format json
 
 # Extract data without source file information
-field-normalizer extract --output contacts.csv --output-format csv
+ultimate-parser extract --output contacts.csv --output-format csv
 
 # Extract data with source file information included
-field-normalizer extract --output contacts.csv --output-format csv --include-source
+ultimate-parser extract --output contacts.csv --output-format csv --include-source
 
 # Use a different mappings file
-field-normalizer extract --mappings custom_mappings.json
+ultimate-parser extract --mappings custom_mappings.json
 
 # Extract data using AI-based field mappings
-field-normalizer extract --use-ai
+ultimate-parser extract --use-ai
 ```
 
 #### Validate Command (AI-Based Mapping Validation)
 ```bash
 # Validate and correct mappings using default settings
-field-normalizer validate
+ultimate-parser validate
 
 # Validate a specific mappings file and save corrected version
-field-normalizer validate --mappings my_mappings.json --output corrected_mappings.json
+ultimate-parser validate --mappings my_mappings.json --output corrected_mappings.json
 
 # Validate mappings against custom target fields
-field-normalizer validate --target-fields name email phone address company department
+ultimate-parser validate --target-fields name email phone address company department
 
 # Validate with data description to improve context understanding
-field-normalizer validate --data-description "Customer contact information from sales database"
+ultimate-parser validate --data-description "Customer contact information from sales database"
 
 # Full validation with all custom options
-field-normalizer validate --mappings old_mappings.json --output new_mappings.json --target-fields name email phone company title --data-description "Employee contact and job information"
+ultimate-parser validate --mappings old_mappings.json --output new_mappings.json --target-fields name email phone company title --data-description "Employee contact and job information"
 ```
 
 #### One-Step Workflow
 ```bash
 # Process all files in one step (analyze and extract)
-field-normalizer process /path/to/data
+ultimate-parser process /path/to/data
 
 # Specify output files for each step in JSONL format (default)
-field-normalizer process /path/to/data --analysis-output report.txt --extract-output contacts.jsonl
+ultimate-parser process /path/to/data --analysis-output report.txt --extract-output contacts.jsonl
 
 # Process and extract data in CSV format
-field-normalizer process /path/to/data --extract-output contacts.csv --output-format csv
+ultimate-parser process /path/to/data --extract-output contacts.csv --output-format csv
 
 # Process and extract data in JSON format with source file information
-field-normalizer process /path/to/data --extract-output contacts.json --output-format json --include-source
+ultimate-parser process /path/to/data --extract-output contacts.json --output-format json --include-source
 
 # Process specific file types with a limit
-field-normalizer process /path/to/data --file-types csv json --max-files 50
+ultimate-parser process /path/to/data --file-types csv json --max-files 50
 
 # Use AI-based field mapping with custom target fields and data description
-field-normalizer process /path/to/data --use-ai --target-fields name email phone address company title --data-description "Looking for customer support tickets with contact information"
+ultimate-parser process /path/to/data --use-ai --target-fields name email phone address company title --data-description "Looking for customer support tickets with contact information"
 ```
 
 ## SQL File Processing
@@ -268,7 +268,7 @@ The tool will:
 
 ## Output Formats
 
-Field Normalizer supports three output formats for extracted data:
+Ultimate Parser supports three output formats for extracted data:
 
 ### 1. JSONL (JSON Lines) - Default
 
@@ -337,9 +337,9 @@ The tool automatically adjusts the output file extension based on the selected f
 **Example:**
 ```bash
 # These commands will create files with appropriate extensions
-field-normalizer extract --output contacts --output-format csv    # Creates contacts.csv
-field-normalizer extract --output data --output-format json      # Creates data.json
-field-normalizer extract --output results --output-format jsonl  # Creates results.jsonl
+ultimate-parser extract --output contacts --output-format csv    # Creates contacts.csv
+ultimate-parser extract --output data --output-format json      # Creates data.json
+ultimate-parser extract --output results --output-format jsonl  # Creates results.jsonl
 ```
 
 ### Source File Information
@@ -348,15 +348,15 @@ By default, source file information is **not** included in the output. Use the `
 
 ```bash
 # Without source file information (default)
-field-normalizer extract --output contacts.csv --output-format csv
+ultimate-parser extract --output contacts.csv --output-format csv
 
 # With source file information
-field-normalizer extract --output contacts.csv --output-format csv --include-source
+ultimate-parser extract --output contacts.csv --output-format csv --include-source
 ```
 
 ## Field Mapping Strategies
 
-Field Normalizer supports two strategies for mapping source fields to target fields:
+Ultimate Parser supports two strategies for mapping source fields to target fields:
 
 ### 1. Regex-Based Mapping (Default)
 
@@ -367,7 +367,7 @@ The default strategy uses regular expressions to match field names against prede
 
 ### 2. AI-Based Mapping
 
-When enabled with the `--use-ai` flag, Field Normalizer uses AI to map source fields to target fields. This approach can handle a wider variety of field names and is especially useful when working with arbitrary target fields.
+When enabled with the `--use-ai` flag, Ultimate Parser uses AI to map source fields to target fields. This approach can handle a wider variety of field names and is especially useful when working with arbitrary target fields.
 
 - **Pros**: More accurate mapping, handles arbitrary target fields, understands context
 - **Cons**: Requires an API key, may incur costs, requires internet connection
@@ -411,10 +411,10 @@ This is particularly useful for:
 
 ## Custom Target Fields
 
-By default, Field Normalizer maps source fields to four predefined target fields: name, email, phone, and address. However, you can specify custom target fields using the `--target-fields` option:
+By default, Ultimate Parser maps source fields to four predefined target fields: name, email, phone, and address. However, you can specify custom target fields using the `--target-fields` option:
 
 ```bash
-field-normalizer analyze /path/to/data --target-fields name email phone address company title department salary
+ultimate-parser analyze /path/to/data --target-fields name email phone address company title department salary
 ```
 
 This is especially powerful when combined with AI-based mapping, as the AI can intelligently map source fields to any arbitrary target fields you specify.
@@ -424,7 +424,7 @@ This is especially powerful when combined with AI-based mapping, as the AI can i
 When using AI-based mapping, you can provide a description of the data you're looking for to help the AI determine file relevance:
 
 ```bash
-field-normalizer analyze /path/to/data --use-ai --data-description "Looking for customer support tickets with contact information"
+ultimate-parser analyze /path/to/data --use-ai --data-description "Looking for customer support tickets with contact information"
 ```
 
 This description helps the AI understand:
@@ -436,10 +436,10 @@ This can significantly improve the accuracy of file relevance determination and 
 
 ## Configuration File
 
-Field Normalizer supports loading configuration from a JSON file. This allows you to specify target fields, data descriptions, and custom field patterns in a reusable format. To use a configuration file, specify it with the `--config` option:
+Ultimate Parser supports loading configuration from a JSON file. This allows you to specify target fields, data descriptions, and custom field patterns in a reusable format. To use a configuration file, specify it with the `--config` option:
 
 ```bash
-field-normalizer analyze /path/to/data --config config.json
+ultimate-parser analyze /path/to/data --config config.json
 ```
 
 ### Configuration File Format
@@ -507,26 +507,26 @@ When using a configuration file:
 #### Using Configuration File with AI
 ```bash
 # Use AI with settings from config file
-field-normalizer analyze /path/to/data --config config.json --use-ai
+ultimate-parser analyze /path/to/data --config config.json --use-ai
 
 # Override config file settings with command line arguments
-field-normalizer analyze /path/to/data --config config.json --use-ai --target-fields name email phone
+ultimate-parser analyze /path/to/data --config config.json --use-ai --target-fields name email phone
 ```
 
 #### Using Configuration File without AI
 ```bash
 # Use regex patterns from config file
-field-normalizer analyze /path/to/data --config config.json
+ultimate-parser analyze /path/to/data --config config.json
 
 # Use custom patterns for specific fields
-field-normalizer analyze /path/to/data --config custom_patterns.json
+ultimate-parser analyze /path/to/data --config custom_patterns.json
 ```
 
 ## Internal Architecture
 
 ### Core Components
 
-The Field Normalizer is built around five main components:
+The Ultimate Parser is built around five main components:
 
 1. **CLI Interface** (`cli.py`): 
    - Handles command-line arguments and orchestrates the workflow
@@ -538,7 +538,7 @@ The Field Normalizer is built around five main components:
    - Supports CSV, JSON, and SQL file formats
    - Handles special cases like inferring headers when they're missing
 
-3. **Field Normalizer** (`field_normalizer.py`):
+3. **Data Processor** (`data_processor.py`):
    - Provides algorithms for normalizing field names
    - Contains pattern-matching logic to categorize fields
    - Groups similar fields by type (name, email, phone, address)
@@ -600,7 +600,7 @@ The tool is designed to handle large datasets by:
 6. **File Relevance Determination**: Files that don't contain relevant data are automatically skipped
 7. **Single Mapping Filtering**: Files with only one mapping are automatically ignored to ensure data quality
 
-This architecture allows Field Normalizer to handle data files of virtually any size with a fixed memory footprint while providing smart data processing capabilities.
+This architecture allows Ultimate Parser to handle data files of virtually any size with a fixed memory footprint while providing smart data processing capabilities.
 
 ## Contributing
 

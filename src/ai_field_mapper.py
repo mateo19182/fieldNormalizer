@@ -12,7 +12,7 @@ from typing import Dict, List, Set, Any, Optional, Tuple
 import dotenv
 import csv
 from tqdm import tqdm
-from src.field_normalizer import normalize_field_name
+from src.field_utilities import normalize_field_name
 
 dotenv.load_dotenv(".env")
 
@@ -466,7 +466,7 @@ JSON response:
             output_path: Path to save the analysis report
         """
         with open(output_path, 'w', encoding='utf-8') as f:
-            f.write("# Field Normalizer AI Analysis Report\n\n")
+            f.write("# Ultimate Parser AI Analysis Report\n\n")
             
             for file_name, api_data in self.api_responses.items():
                 f.write(f"## File: {file_name}\n\n")

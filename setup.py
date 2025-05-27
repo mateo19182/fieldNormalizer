@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="field-normalizer",
+    name="ultimate-parser",
     version="0.1.0",
     packages=find_packages(),
     install_requires=[
@@ -13,10 +13,10 @@ setup(
     ],
     entry_points={
         'console_scripts': [
-            'field-normalizer=src.cli:main',
+            'ultimate-parser=src.cli:main',
         ],
     },
-    description="A tool for extracting and normalizing headers from various data files",
+    description="The ultimate tool for extracting and parsing data from various file formats",
     author="Your Name",
     author_email="your.email@example.com",
     python_requires=">=3.6",

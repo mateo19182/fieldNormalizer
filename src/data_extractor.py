@@ -1,5 +1,5 @@
 """
-Data extraction module for Field Normalizer.
+Data extraction module for Ultimate Parser.
 Handles extracting data from files based on field mappings.
 """
 import csv
@@ -10,8 +10,8 @@ from typing import Dict, List, Set, Any, Iterator, Optional, Tuple
 from tqdm import tqdm
 import concurrent.futures
 from src.field_mapper import FieldMapper, DEFAULT_TARGET_FIELDS
-from src.field_normalizer import validate_field_value
-from src.extractors import find_header_row
+from src.field_utilities import validate_field_value
+from src.header_extractors import find_header_row
 
 def extract_data_from_file(file_path: str, field_mapping: Dict[str, List[str]]) -> Iterator[Dict[str, Any]]:
     """

@@ -7,7 +7,7 @@ import json
 import os
 import re
 from typing import Dict, List, Set, Any, Optional
-from src.field_normalizer import get_field_type, normalize_field_name, FIELD_PATTERNS
+from src.field_utilities import get_field_type, normalize_field_name, FIELD_PATTERNS
 
 # Default target field categories
 DEFAULT_TARGET_FIELDS = ['email', 'phone', 'firstName', 'middleName', 'lastName', 'address', 'city', 'state', 'zipCode', 'country']

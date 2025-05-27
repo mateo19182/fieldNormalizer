@@ -7,7 +7,7 @@ import os
 import sys
 import re
 from typing import List, Set, Tuple, Optional
-from .infer_headers import sample_csv_data, generate_headers_with_openrouter, update_csv_with_headers
+from .ai_header_inferrer import sample_csv_data, generate_headers_with_openrouter, update_csv_with_headers
 
 
 def extract_headers_from_file(file_path: str) -> Tuple[List[str], bool]:

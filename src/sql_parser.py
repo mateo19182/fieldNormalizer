@@ -476,7 +476,7 @@ class SQLParser:
     
     def _create_record_from_values(self, values: List[str], column_mapping: Dict[int, Tuple[str, str]], file_path: str) -> Optional[Dict[str, Any]]:
         """Create a record from parsed values and column mapping."""
-        from .field_normalizer import validate_field_value
+        from .data_processor import validate_field_value
         
         record = {}
         
